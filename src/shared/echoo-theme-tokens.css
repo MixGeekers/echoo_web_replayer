@@ -1,0 +1,592 @@
+/* ECHOO 设计 token：浅色 :root、主题属性与深色 data-echo-theme="dark"；只含变量，外部站点经 @echoo/module-root.ui/theme-tokens.css 使用。 */
+:root {
+  color-scheme: light;
+  --echo-foundation-white: #ffffff;
+  --echo-foundation-black: #000000;
+  --echo-foundation-slate-50: #f8fafc;
+  --echo-foundation-slate-100: #f1f5f9;
+  --echo-foundation-slate-200: #e2e8f0;
+  --echo-foundation-slate-300: #cbd5e1;
+  --echo-foundation-slate-400: #94a3b8;
+  --echo-foundation-slate-500: #64748b;
+  --echo-foundation-slate-600: #475569;
+  --echo-foundation-slate-700: #334155;
+  --echo-foundation-slate-800: #1e293b;
+  --echo-foundation-slate-900: #0f172a;
+  --echo-foundation-cyan-50: #ecfeff;
+  --echo-foundation-cyan-100: #cffafe;
+  --echo-foundation-cyan-200: #a5f3fc;
+  --echo-foundation-cyan-300: #67e8f9;
+  --echo-foundation-cyan-400: #22d3ee;
+  --echo-foundation-cyan-500: #06b6d4;
+  --echo-foundation-cyan-600: #0891b2;
+  --echo-foundation-cyan-700: #0e7490;
+  --echo-foundation-cyan-800: #155e75;
+  --echo-foundation-cyan-900: #164e63;
+  --echo-foundation-blue-50: #eff6ff;
+  --echo-foundation-blue-100: #dbeafe;
+  --echo-foundation-blue-200: #bfdbfe;
+  --echo-foundation-blue-300: #93c5fd;
+  --echo-foundation-blue-400: #60a5fa;
+  --echo-foundation-blue-500: #3b82f6;
+  --echo-foundation-blue-600: #2563eb;
+  --echo-foundation-blue-700: #1d4ed8;
+  --echo-foundation-blue-800: #1e40af;
+  --echo-foundation-blue-900: #1e3a8a;
+  --echo-foundation-green-50: #ecfdf5;
+  --echo-foundation-green-100: #d1fae5;
+  --echo-foundation-green-200: #a7f3d0;
+  --echo-foundation-green-300: #6ee7b7;
+  --echo-foundation-green-400: #34d399;
+  --echo-foundation-green-500: #10b981;
+  --echo-foundation-green-600: #059669;
+  --echo-foundation-green-700: #047857;
+  --echo-foundation-green-800: #065f46;
+  --echo-foundation-green-900: #064e3b;
+  --echo-foundation-amber-50: #fffbeb;
+  --echo-foundation-amber-100: #fef3c7;
+  --echo-foundation-amber-200: #fde68a;
+  --echo-foundation-amber-300: #fcd34d;
+  --echo-foundation-amber-400: #fbbf24;
+  --echo-foundation-amber-500: #f59e0b;
+  --echo-foundation-amber-600: #d97706;
+  --echo-foundation-amber-700: #b45309;
+  --echo-foundation-amber-800: #92400e;
+  --echo-foundation-amber-900: #78350f;
+  --echo-foundation-red-50: #fef2f2;
+  --echo-foundation-red-100: #fee2e2;
+  --echo-foundation-red-200: #fecaca;
+  --echo-foundation-red-300: #fca5a5;
+  --echo-foundation-red-400: #f87171;
+  --echo-foundation-red-500: #ef4444;
+  --echo-foundation-red-600: #dc2626;
+  --echo-foundation-red-700: #b91c1c;
+  --echo-foundation-red-800: #991b1b;
+  --echo-foundation-red-900: #7f1d1d;
+  --echo-foundation-violet-50: #f5f3ff;
+  --echo-foundation-violet-100: #ede9fe;
+  --echo-foundation-violet-200: #ddd6fe;
+  --echo-foundation-violet-300: #c4b5fd;
+  --echo-foundation-violet-400: #a78bfa;
+  --echo-foundation-violet-500: #8b5cf6;
+  --echo-foundation-violet-600: #7c3aed;
+  --echo-foundation-violet-700: #6d28d9;
+  --echo-foundation-violet-800: #5b21b6;
+  --echo-foundation-violet-900: #4c1d95;
+  --echo-foundation-transparent: transparent;
+  --echo-foundation-overlay-4: rgb(15 23 42 / 4%);
+  --echo-foundation-overlay-8: rgb(15 23 42 / 8%);
+  --echo-foundation-overlay-12: rgb(15 23 42 / 12%);
+  --echo-foundation-overlay-20: rgb(15 23 42 / 20%);
+  --echo-layout-header-height: 48px;
+  /* 大区 Rail 宽度：图标按钮占满宽度，当前大区左侧留 4px 圆角位。 */
+  --echo-layout-rail-width: 44px;
+  --echo-layout-page-tabs-height: 36px;
+  /* 并入默认 Header 后的单行标题栏：与页签同高，页签上下贴满，不留空隙。 */
+  --echo-layout-window-bar-height: var(--echo-layout-page-tabs-height);
+  /* 标题栏圆形图标按钮（侧栏、返回、前进、新建、全部页面、面板）：与页签同一中线。 */
+  --echo-layout-titlebar-action-size: 32px;
+  --echo-layout-page-tab-min-width: 128px;
+  --echo-layout-page-tab-max-width: 216px;
+  /* 窗口标题区：Window Controls Overlay 几何；普通浏览器标签页均为 0。 */
+  --echo-window-titlebar-height: env(titlebar-area-height, 0px);
+  --echo-window-controls-inset-start: env(titlebar-area-x, 0px);
+  --echo-window-controls-inset-end: max(
+    0px,
+    calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw))
+  );
+  --echo-layout-content-max: 1600px;
+  /* 未使用共享内容表面的页面与内容区边缘的缝；使用共享表面的页面铺满内容区，不留边距。 */
+  --echo-layout-content-padding: 6px;
+  /* 内容表面内各区（筛选栏、页签栏、单据头、明细、分页）的横向内缩，第一列左缘彼此对齐。 */
+  --echo-layout-surface-inset: 12px;
+  /* 视口内页面可用高度（单行标题栏之外）。页面贴合布局优先用 height:100%，此变量供弹窗等场景。 */
+  --echo-page-available-height: calc(
+    100dvh - var(--echo-layout-window-bar-height)
+  );
+  --echo-layout-resource-small-width: 360px;
+  --echo-layout-resource-small-height: 64px;
+  --echo-layout-resource-medium-width: 440px;
+  --echo-layout-resource-medium-height: 160px;
+  --echo-layout-resource-large-width: 560px;
+  --echo-layout-resource-large-height: 280px;
+  --echo-layout-link-height: 28px;
+  /* 移动工作面（R-MOB-12）：触控目标、顶部导航栏与底部页签栏高度。 */
+  --echo-layout-touch-target: 44px;
+  --echo-layout-mobile-navbar-height: 46px;
+  --echo-layout-mobile-tabbar-height: 50px;
+  --echo-space-1: 4px;
+  --echo-space-2: 8px;
+  --echo-space-3: 12px;
+  --echo-space-4: 16px;
+  --echo-space-5: 20px;
+  --echo-space-6: 24px;
+  --echo-space-8: 32px;
+  --echo-space-10: 40px;
+  --echo-space-12: 48px;
+  --echo-radius-xs: 4px;
+  --echo-radius-sm: 6px;
+  --echo-radius-md: 8px;
+  --echo-radius-lg: 12px;
+  --echo-radius-xl: 16px;
+  --echo-radius-pill: 999px;
+  /* 状态色角色：填充 / 悬停 / 按下 / 文字 / 浅底，对比度要求见视觉设计规范「颜色对比度」，
+     由 scripts/check-ui-token-contrast.mjs 检查。深色主题只重设填充与文字，其余角色随之派生。 */
+  --echo-semantic-brand: var(--echo-foundation-blue-600);
+  --echo-semantic-brand-text: var(--echo-foundation-blue-700);
+  --echo-semantic-success: var(--echo-foundation-green-700);
+  --echo-semantic-success-text: var(--echo-foundation-green-800);
+  --echo-semantic-warning: var(--echo-foundation-amber-700);
+  --echo-semantic-warning-text: var(--echo-foundation-amber-800);
+  --echo-semantic-danger: var(--echo-foundation-red-600);
+  --echo-semantic-danger-text: var(--echo-foundation-red-700);
+  --echo-semantic-info: var(--echo-foundation-slate-500);
+  --echo-semantic-info-text: var(--echo-foundation-slate-600);
+  --echo-semantic-brand-hover: color-mix(
+    in srgb,
+    var(--echo-semantic-brand) 86%,
+    var(--echo-text-primary)
+  );
+  --echo-semantic-brand-active: color-mix(
+    in srgb,
+    var(--echo-semantic-brand) 74%,
+    var(--echo-text-primary)
+  );
+  --echo-semantic-success-hover: color-mix(
+    in srgb,
+    var(--echo-semantic-success) 86%,
+    var(--echo-text-primary)
+  );
+  --echo-semantic-success-active: color-mix(
+    in srgb,
+    var(--echo-semantic-success) 74%,
+    var(--echo-text-primary)
+  );
+  --echo-semantic-warning-hover: color-mix(
+    in srgb,
+    var(--echo-semantic-warning) 86%,
+    var(--echo-text-primary)
+  );
+  --echo-semantic-warning-active: color-mix(
+    in srgb,
+    var(--echo-semantic-warning) 74%,
+    var(--echo-text-primary)
+  );
+  --echo-semantic-danger-hover: color-mix(
+    in srgb,
+    var(--echo-semantic-danger) 86%,
+    var(--echo-text-primary)
+  );
+  --echo-semantic-danger-active: color-mix(
+    in srgb,
+    var(--echo-semantic-danger) 74%,
+    var(--echo-text-primary)
+  );
+  --echo-semantic-info-hover: color-mix(
+    in srgb,
+    var(--echo-semantic-info) 86%,
+    var(--echo-text-primary)
+  );
+  --echo-semantic-info-active: color-mix(
+    in srgb,
+    var(--echo-semantic-info) 74%,
+    var(--echo-text-primary)
+  );
+  --echo-semantic-brand-soft: color-mix(
+    in srgb,
+    var(--echo-semantic-brand) 10%,
+    var(--echo-surface-panel)
+  );
+  --echo-semantic-focus: var(--echo-semantic-brand);
+  --echo-rail-surface: var(--echo-surface-rail);
+  --echo-rail-text: var(--echo-text-secondary);
+  --echo-rail-border: var(--echo-chrome-separator);
+  --echo-rail-hover: var(--echo-chrome-tab-hover);
+  /* 当前大区：与侧栏、页签栏同为外框色并连成一片，图标用主色文字色。 */
+  --echo-rail-active-surface: var(--echo-surface-frame);
+  --echo-rail-active-text: var(--echo-semantic-brand-text);
+  --echo-sidebar-scrollbar-thumb: color-mix(
+    in srgb,
+    var(--echo-text-secondary) 45%,
+    transparent
+  );
+  --echo-backdrop: color-mix(
+    in srgb,
+    var(--echo-foundation-black) 40%,
+    transparent
+  );
+  --echo-surface-hover: var(--echo-surface-muted);
+  --echo-surface-canvas: #f6f8fb;
+  --echo-surface-header: #ffffff;
+  /* Header 叠在画布上的不透明等效色：当前页签据此与 Header 无缝连通。 */
+  --echo-surface-header-solid: #ffffff;
+  --echo-surface-panel: #ffffff;
+  --echo-surface-raised: #ffffff;
+  --echo-surface-muted: #f1f5f9;
+  --echo-surface-selected: var(--echo-semantic-brand-soft);
+  --echo-surface-overlay: rgb(255 255 255 / 86%);
+  /* 窗口外壳专用：页签标题栏与侧栏组成的外框底色。 */
+  --echo-surface-frame: #e6ebf2;
+  /* 窗口外壳专用：大区 Rail 底色，比外框深一级。 */
+  --echo-surface-rail: #d9e0ea;
+  /* 桌面内容区底色：使用共享内容表面的页面铺满内容区，与表面同色。 */
+  --echo-surface-workspace: var(--echo-surface-panel);
+  --echo-chrome-tab-hover: rgb(15 23 42 / 6%);
+  --echo-chrome-separator: rgb(15 23 42 / 14%);
+  --echo-chrome-grain-opacity: 0.5;
+  --echo-text-primary: #0f172a;
+  --echo-text-secondary: #475569;
+  --echo-text-muted: #5f6c7f;
+  --echo-text-disabled: #94a3b8;
+  --echo-text-on-brand: #ffffff;
+  --echo-border-default: #e2e8f0;
+  --echo-border-strong: #cbd5e1;
+  --echo-field-background: var(--echo-surface-panel);
+  --echo-field-border: var(--echo-border-default);
+  --echo-border-selected: color-mix(
+    in srgb,
+    var(--echo-semantic-brand) 50%,
+    var(--echo-surface-panel)
+  );
+  --echo-shadow-xs: 0 1px 2px rgb(15 23 42 / 6%);
+  --echo-shadow-sm: 0 2px 8px rgb(15 23 42 / 8%);
+  --echo-shadow-md: 0 10px 30px rgb(15 23 42 / 10%);
+  --echo-shadow-lg: 0 24px 60px rgb(15 23 42 / 14%);
+  /* 拉丁字符用字体集的 Inter，中文用字体集的 Noto Sans SC（均按 unicode-range 懒加载）；
+     字体集分片下载前后依次回退到系统中文字体。 */
+  --echo-system-font-family:
+    "Inter", "Noto Sans SC", "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", system-ui,
+    sans-serif;
+  --echo-system-font-mono:
+    ui-monospace, "SFMono-Regular", "Cascadia Mono", Consolas,
+    "Liberation Mono", monospace;
+  --echo-system-font-xs: 11px;
+  --echo-system-font-sm: 12px;
+  --echo-system-font-md: 14px;
+  --echo-system-font-lg: 16px;
+  --echo-system-font-xl: 20px;
+  --echo-system-font-2xl: 28px;
+  --echo-system-font-3xl: 36px;
+  --echo-system-line-tight: 1.2;
+  --echo-system-line-normal: 1.5;
+  --echo-system-line-relaxed: 1.65;
+  --echo-system-weight-regular: 400;
+  --echo-system-weight-medium: 500;
+  --echo-system-weight-semibold: 600;
+  --echo-system-weight-bold: 700;
+  --echo-system-duration-fast: 120ms;
+  --echo-system-duration-normal: 180ms;
+  --echo-system-duration-slow: 280ms;
+  --echo-system-duration-emphasis: 360ms;
+  --echo-system-ease: cubic-bezier(0.2, 0, 0, 1);
+  /* 外壳位置变化专用：轻微回弹，只用于页签滑移、展开与让位。 */
+  --echo-system-ease-spring: cubic-bezier(0.34, 1.32, 0.64, 1);
+  --echo-system-ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --echo-layout-header-logo-width: 132px;
+  --echo-layout-header-control-size: 26px;
+  --echo-layout-panel-padding: 20px;
+  --echo-layout-card-min-width: 250px;
+  /* 页面 Overlay 宽度档：EchooPageDialog / EchooPageDrawer 的 tier 属性。 */
+  --echo-layout-dialog-sm: 480px;
+  --echo-layout-dialog-md: 640px;
+  --echo-layout-drawer-sm: 480px;
+  --echo-layout-drawer-md: 720px;
+  --echo-layout-drawer-lg: 960px;
+  /* 列表工具栏弹出面板宽度：列设置等小面板 sm，「更多筛选」md。 */
+  --echo-layout-popover-sm: 240px;
+  --echo-layout-popover-md: 400px;
+  --echo-layout-table-row-height: 44px;
+  --echo-layout-control-small: 24px;
+  --echo-layout-control-medium: 32px;
+  --echo-layout-control-large: 40px;
+  --echo-semantic-link: var(--echo-semantic-brand-text);
+  --echo-semantic-link-hover: color-mix(
+    in srgb,
+    var(--echo-semantic-brand-text) 80%,
+    var(--echo-text-primary)
+  );
+  --echo-semantic-link-danger: var(--echo-semantic-danger-text);
+  --echo-semantic-resource-resolved: var(--echo-semantic-brand);
+  --echo-semantic-resource-unreachable: var(--echo-semantic-warning);
+  --echo-semantic-resource-missing: var(--echo-semantic-danger);
+  --echo-semantic-resource-forbidden: var(--echo-semantic-info);
+  --echo-semantic-resource-retired: var(--echo-semantic-info);
+  --echo-semantic-notice-background: var(--echo-semantic-brand-soft);
+  --echo-semantic-brand-background: var(--echo-semantic-brand-soft);
+  --echo-semantic-success-background: color-mix(
+    in srgb,
+    var(--echo-semantic-success) 10%,
+    var(--echo-surface-panel)
+  );
+  --echo-semantic-warning-background: color-mix(
+    in srgb,
+    var(--echo-semantic-warning) 10%,
+    var(--echo-surface-panel)
+  );
+  --echo-semantic-danger-background: color-mix(
+    in srgb,
+    var(--echo-semantic-danger) 10%,
+    var(--echo-surface-panel)
+  );
+  --echo-semantic-info-background: color-mix(
+    in srgb,
+    var(--echo-semantic-info) 10%,
+    var(--echo-surface-panel)
+  );
+  --echo-semantic-disabled-opacity: 0.48;
+  --echo-semantic-hover-opacity: 0.92;
+  --echo-semantic-pressed-opacity: 0.82;
+  /* 与 EchooIcon 的命名尺寸一致：small / medium / large / display。 */
+  --echo-system-icon-small: 16px;
+  --echo-system-icon-medium: 20px;
+  --echo-system-icon-large: 24px;
+  --echo-system-icon-display: 32px;
+  --echo-system-border-thin: 1px;
+  --echo-system-border-strong: 2px;
+  --echo-system-z-base: 1;
+  --echo-system-z-navigation: 30;
+  --echo-system-z-header: 40;
+  --echo-system-z-overlay: 100;
+  --echo-system-z-popover: 200;
+  --echo-system-blur-alpha: 18px;
+  --echo-system-content-readable: 720px;
+  --echo-system-content-wide: 1120px;
+  --echo-system-control-focus-ring: 2px;
+}
+
+:root,
+:root[data-echo-theme] {
+  --el-color-primary: var(--echo-semantic-brand);
+  --el-color-primary-light-3: color-mix(
+    in srgb,
+    var(--echo-semantic-brand) 70%,
+    var(--echo-surface-panel)
+  );
+  --el-color-primary-light-5: color-mix(
+    in srgb,
+    var(--echo-semantic-brand) 50%,
+    var(--echo-surface-panel)
+  );
+  --el-color-primary-light-7: color-mix(
+    in srgb,
+    var(--echo-semantic-brand) 30%,
+    var(--echo-surface-panel)
+  );
+  --el-color-primary-light-8: color-mix(
+    in srgb,
+    var(--echo-semantic-brand) 20%,
+    var(--echo-surface-panel)
+  );
+  --el-color-primary-light-9: var(--echo-surface-selected);
+  --el-color-primary-dark-2: var(--echo-semantic-brand-active);
+  --el-color-success: var(--echo-semantic-success);
+  --el-color-success-light-3: color-mix(
+    in srgb,
+    var(--echo-semantic-success) 70%,
+    var(--echo-surface-panel)
+  );
+  --el-color-success-light-5: color-mix(
+    in srgb,
+    var(--echo-semantic-success) 50%,
+    var(--echo-surface-panel)
+  );
+  --el-color-success-light-7: color-mix(
+    in srgb,
+    var(--echo-semantic-success) 30%,
+    var(--echo-surface-panel)
+  );
+  --el-color-success-light-8: color-mix(
+    in srgb,
+    var(--echo-semantic-success) 20%,
+    var(--echo-surface-panel)
+  );
+  --el-color-success-light-9: var(--echo-semantic-success-background);
+  --el-color-success-dark-2: var(--echo-semantic-success-active);
+  --el-color-warning: var(--echo-semantic-warning);
+  --el-color-warning-light-3: color-mix(
+    in srgb,
+    var(--echo-semantic-warning) 70%,
+    var(--echo-surface-panel)
+  );
+  --el-color-warning-light-5: color-mix(
+    in srgb,
+    var(--echo-semantic-warning) 50%,
+    var(--echo-surface-panel)
+  );
+  --el-color-warning-light-7: color-mix(
+    in srgb,
+    var(--echo-semantic-warning) 30%,
+    var(--echo-surface-panel)
+  );
+  --el-color-warning-light-8: color-mix(
+    in srgb,
+    var(--echo-semantic-warning) 20%,
+    var(--echo-surface-panel)
+  );
+  --el-color-warning-light-9: var(--echo-semantic-warning-background);
+  --el-color-warning-dark-2: var(--echo-semantic-warning-active);
+  --el-color-danger: var(--echo-semantic-danger);
+  --el-color-danger-light-3: color-mix(
+    in srgb,
+    var(--echo-semantic-danger) 70%,
+    var(--echo-surface-panel)
+  );
+  --el-color-danger-light-5: color-mix(
+    in srgb,
+    var(--echo-semantic-danger) 50%,
+    var(--echo-surface-panel)
+  );
+  --el-color-danger-light-7: color-mix(
+    in srgb,
+    var(--echo-semantic-danger) 30%,
+    var(--echo-surface-panel)
+  );
+  --el-color-danger-light-8: color-mix(
+    in srgb,
+    var(--echo-semantic-danger) 20%,
+    var(--echo-surface-panel)
+  );
+  --el-color-danger-light-9: var(--echo-semantic-danger-background);
+  --el-color-danger-dark-2: var(--echo-semantic-danger-active);
+  --el-color-error: var(--echo-semantic-danger);
+  --el-color-error-light-3: color-mix(
+    in srgb,
+    var(--echo-semantic-danger) 70%,
+    var(--echo-surface-panel)
+  );
+  --el-color-error-light-5: color-mix(
+    in srgb,
+    var(--echo-semantic-danger) 50%,
+    var(--echo-surface-panel)
+  );
+  --el-color-error-light-7: color-mix(
+    in srgb,
+    var(--echo-semantic-danger) 30%,
+    var(--echo-surface-panel)
+  );
+  --el-color-error-light-8: color-mix(
+    in srgb,
+    var(--echo-semantic-danger) 20%,
+    var(--echo-surface-panel)
+  );
+  --el-color-error-light-9: var(--echo-semantic-danger-background);
+  --el-color-error-dark-2: var(--echo-semantic-danger-active);
+  --el-color-info: var(--echo-semantic-info);
+  --el-color-info-light-3: color-mix(
+    in srgb,
+    var(--echo-semantic-info) 70%,
+    var(--echo-surface-panel)
+  );
+  --el-color-info-light-5: color-mix(
+    in srgb,
+    var(--echo-semantic-info) 50%,
+    var(--echo-surface-panel)
+  );
+  --el-color-info-light-7: color-mix(
+    in srgb,
+    var(--echo-semantic-info) 30%,
+    var(--echo-surface-panel)
+  );
+  --el-color-info-light-8: color-mix(
+    in srgb,
+    var(--echo-semantic-info) 20%,
+    var(--echo-surface-panel)
+  );
+  --el-color-info-light-9: var(--echo-semantic-info-background);
+  --el-color-info-dark-2: var(--echo-semantic-info-active);
+  --el-bg-color: var(--echo-surface-panel);
+  --el-bg-color-page: var(--echo-surface-canvas);
+  --el-bg-color-overlay: var(--echo-surface-raised);
+  --el-text-color-primary: var(--echo-text-primary);
+  --el-text-color-regular: var(--echo-text-secondary);
+  --el-text-color-secondary: var(--echo-text-muted);
+  --el-text-color-placeholder: var(--echo-text-muted);
+  --el-text-color-disabled: var(--echo-text-disabled);
+  --el-border-color: var(--echo-border-default);
+  --el-border-color-light: var(--echo-border-default);
+  --el-border-color-lighter: color-mix(
+    in srgb,
+    var(--echo-border-default) 70%,
+    transparent
+  );
+  --el-border-color-extra-light: color-mix(
+    in srgb,
+    var(--echo-border-default) 50%,
+    transparent
+  );
+  --el-border-color-dark: var(--echo-border-strong);
+  --el-border-color-darker: var(--echo-border-strong);
+  --el-fill-color: var(--echo-surface-muted);
+  --el-fill-color-light: var(--echo-surface-muted);
+  --el-fill-color-lighter: color-mix(
+    in srgb,
+    var(--echo-surface-muted) 60%,
+    var(--echo-surface-panel)
+  );
+  --el-fill-color-extra-light: color-mix(
+    in srgb,
+    var(--echo-surface-muted) 30%,
+    var(--echo-surface-panel)
+  );
+  --el-fill-color-dark: color-mix(
+    in srgb,
+    var(--echo-text-muted) 20%,
+    var(--echo-surface-panel)
+  );
+  --el-fill-color-darker: color-mix(
+    in srgb,
+    var(--echo-text-muted) 30%,
+    var(--echo-surface-panel)
+  );
+  --el-fill-color-blank: var(--echo-surface-panel);
+  --el-disabled-bg-color: var(--echo-surface-muted);
+  --el-disabled-text-color: var(--echo-text-disabled);
+  --el-border-radius-base: var(--echo-radius-md);
+}
+
+:root[data-echo-theme="dark"] {
+  color-scheme: dark;
+  /* 画布比外框亮一级：未铺满的页面里内容区与侧栏、页签栏分得开（外壳层级见视觉设计规范「颜色对比度」）。 */
+  --echo-surface-canvas: #0b1624;
+  --echo-surface-header: #0f172a;
+  --echo-surface-header-solid: #0f172a;
+  --echo-surface-panel: #111c2e;
+  --echo-surface-raised: #1e293b;
+  --echo-surface-muted: #182235;
+  --echo-surface-selected: color-mix(
+    in srgb,
+    var(--echo-semantic-brand) 20%,
+    var(--echo-surface-panel)
+  );
+  --echo-surface-overlay: #0f172a;
+  --echo-surface-frame: #050b14;
+  --echo-surface-rail: var(--echo-foundation-black);
+  --echo-chrome-tab-hover: rgb(248 250 252 / 6%);
+  --echo-chrome-separator: rgb(148 163 184 / 22%);
+  --echo-chrome-grain-opacity: 0.9;
+  --echo-text-primary: #f8fafc;
+  --echo-text-secondary: #cbd5e1;
+  --echo-text-muted: #94a3b8;
+  --echo-text-disabled: #64748b;
+  --echo-border-default: #263449;
+  --echo-border-strong: #475569;
+  --echo-field-background: var(--echo-surface-muted);
+  --echo-field-border: var(--echo-border-strong);
+  --echo-text-on-brand: var(--echo-foundation-slate-900);
+  --echo-semantic-brand: var(--echo-foundation-blue-400);
+  --echo-semantic-brand-text: var(--echo-foundation-blue-300);
+  --echo-semantic-success: var(--echo-foundation-green-400);
+  --echo-semantic-success-text: var(--echo-foundation-green-300);
+  --echo-semantic-warning: var(--echo-foundation-amber-400);
+  --echo-semantic-warning-text: var(--echo-foundation-amber-300);
+  --echo-semantic-danger: var(--echo-foundation-red-400);
+  --echo-semantic-danger-text: var(--echo-foundation-red-300);
+  --echo-semantic-info: var(--echo-foundation-slate-400);
+  --echo-semantic-info-text: var(--echo-foundation-slate-300);
+  --echo-border-selected: var(--echo-semantic-brand);
+  --echo-shadow-xs: 0 1px 2px rgb(0 0 0 / 24%);
+  --echo-shadow-sm: 0 2px 10px rgb(0 0 0 / 30%);
+  --echo-shadow-md: 0 12px 32px rgb(0 0 0 / 36%);
+  --echo-shadow-lg: 0 28px 70px rgb(0 0 0 / 44%);
+}

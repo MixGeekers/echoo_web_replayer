@@ -1,0 +1,45 @@
+{
+  "name": "tracedock",
+  "version": "0.2.0",
+  "private": true,
+  "description": "TraceDock 浏览器操作与 DOM 时间线采集工作台",
+  "main": "src/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.cjs",
+    "test:smoke": "node scripts/smoke.cjs",
+    "test:export-desktop": "node scripts/export-desktop-smoke.cjs",
+    "test:large": "node scripts/large-recording.cjs",
+    "build": "electron-builder --win portable --x64",
+    "build:dir": "electron-builder --win --dir --x64"
+  },
+  "dependencies": {
+    "stream-json": "1.9.1"
+  },
+  "devDependencies": {
+    "adm-zip": "^0.5.16",
+    "electron": "45.1.0",
+    "electron-builder": "26.18.0",
+    "playwright-core": "1.64.1"
+  },
+  "build": {
+    "appId": "com.tracedock.desktop",
+    "productName": "TraceDock",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "win": {
+      "target": "portable",
+      "signAndEditExecutable": false
+    },
+    "portable": {
+      "artifactName": "TraceDock-${version}-Windows-${arch}.exe",
+      "unpackDirName": true
+    }
+  }
+}

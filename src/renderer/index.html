@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'">
+  <title>TraceDock · 浏览器采集</title>
+  <link rel="stylesheet" href="../shared/echoo-theme-tokens.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <aside class="sidebar" aria-label="采集会话">
+    <div class="sidebar-brand">
+      <img class="brand-logo" src="../shared/echootek-logo.svg" alt="ECHOOTEK" title="TraceDock · 浏览器采集">
+      <button id="help-button" class="icon-button" title="使用说明" aria-label="使用说明" data-icon="help"></button>
+    </div>
+    <div class="section-heading">
+      <span>会话</span><span id="session-total" class="count-chip">0</span>
+      <button id="new-session-button" class="icon-button" title="新建采集会话" aria-label="新建采集会话" data-icon="plus"></button>
+    </div>
+    <div id="session-list" class="session-list" tabindex="-1" aria-label="历史采集会话"></div>
+  </aside>
+
+  <main class="main">
+    <div class="workbench">
+      <section class="browser-card" aria-label="内嵌浏览器">
+        <form class="address-toolbar" id="address-form">
+          <button type="button" id="back-button" class="icon-button" title="后退" aria-label="后退" data-icon="arrow-left" disabled></button>
+          <button type="button" id="forward-button" class="icon-button" title="前进" aria-label="前进" data-icon="arrow-right" disabled></button>
+          <button type="button" id="reload-button" class="icon-button" title="刷新页面" aria-label="刷新页面" data-icon="reload"></button>
+          <label class="address-field">
+            <span id="address-icon" data-icon="globe"></span>
+            <input id="address-input" aria-label="页面地址" placeholder="输入网址" spellcheck="false" autocomplete="off">
+            <button type="submit" class="address-go icon-button" title="访问网址" aria-label="访问网址" data-icon="arrow-right"></button>
+          </label>
+          <button type="button" id="home-button" class="demo-button" title="打开本地演示页面">演示页</button>
+        </form>
+        <div id="browser-error" class="browser-error" hidden>
+          <span data-icon="info"></span><span id="browser-error-text"></span>
+        </div>
+        <div id="browser-surface" class="browser-surface">
+          <div class="browser-placeholder">正在加载页面…</div>
+        </div>
+      </section>
+
+      <section class="timeline-card" aria-label="事件时间线">
+        <div class="capture-toolbar">
+          <span id="recording-status" class="recording-status"><i></i><span>就绪</span></span>
+          <div class="capture-actions">
+            <button id="start-button" class="button primary"><span data-icon="record"></span>开始采集</button>
+            <button id="pause-button" class="button" hidden><span data-icon="pause"></span><span>暂停</span></button>
+            <button id="stop-button" class="button stop" hidden><span data-icon="stop"></span>结束</button>
+            <button id="export-button" class="button export" disabled><span data-icon="download"></span>导出 ZIP</button>
+          </div>
+        </div>
+
+        <div class="session-overview">
+          <strong id="current-session-name">未开始采集</strong>
+          <span id="current-session-subtitle"></span>
+        </div>
+        <div class="session-metrics" aria-label="会话统计">
+          <div><span>操作</span><strong id="action-count">0</strong></div>
+          <div><span>DOM 批次</span><strong id="mutation-count">0</strong></div>
+          <div><span>快照</span><strong id="snapshot-count">0</strong></div>
+          <div><span>时长</span><strong id="duration">00:00</strong></div>
+        </div>
+
+        <div class="timeline-heading">
+          <h2>时间线<span id="timeline-count" class="count-chip">0</span></h2>
+          <div class="timeline-tools">
+            <button id="snapshot-button" class="icon-button" title="捕获 DOM 快照" aria-label="捕获 DOM 快照" data-icon="camera" disabled></button>
+            <button id="follow-button" class="follow-button selected" title="跟随最新事件" aria-pressed="true"><span data-icon="pulse"></span>实时</button>
+          </div>
+        </div>
+        <div class="timeline-filters" role="group" aria-label="筛选事件类型">
+          <button class="selected" data-filter="all">全部</button>
+          <button data-filter="action">操作</button>
+          <button data-filter="dom.mutation">DOM</button>
+          <button data-filter="dom.snapshot">快照</button>
+          <button data-filter="page">页面</button>
+        </div>
+        <label class="timeline-search">
+          <span data-icon="search"></span>
+          <input id="search-input" type="search" placeholder="搜索事件、元素或内容" aria-label="搜索时间线">
+          <kbd>/</kbd>
+        </label>
+        <div id="timeline-list" class="timeline-list" aria-live="off"></div>
+        <button id="load-more-button" class="load-more" hidden>加载更早的事件<span data-icon="chevron-down"></span></button>
+        <div id="event-detail" class="event-detail" hidden>
+          <div class="detail-heading">
+            <div><span id="detail-kind" class="event-kind"></span><strong id="detail-title">事件详情</strong></div>
+            <button id="close-detail-button" class="icon-button" title="关闭详情" aria-label="关闭详情" data-icon="close"></button>
+          </div>
+          <div class="detail-meta" id="detail-meta"></div>
+          <pre id="detail-json" tabindex="0"></pre>
+        </div>
+        <div class="timeline-footer">
+          <span class="browser-connection"><i id="page-status-dot"></i><span id="page-status">页面就绪</span></span>
+          <span id="viewport-size" title="浏览器视口尺寸"></span>
+          <span id="timeline-display-count">0 条事件</span>
+        </div>
+        <div id="export-progress" class="export-progress" role="status" hidden>
+          <div><span id="export-progress-label">准备导出…</span><button id="cancel-export-button" type="button">取消</button></div>
+          <progress id="export-progress-bar" aria-label="导出进度"></progress>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <div id="toast" class="toast" role="status" hidden>
+    <span id="toast-icon" data-icon="check"></span>
+    <div><strong id="toast-title"></strong><span id="toast-message"></span><button id="toast-action" hidden>打开所在文件夹</button></div>
+    <button id="toast-close" class="icon-button" aria-label="关闭提示" data-icon="close"></button>
+  </div>
+
+  <dialog id="session-dialog" class="dialog">
+    <form id="session-form">
+      <h2>新建采集会话</h2>
+      <label for="session-name-input">会话名称</label>
+      <input id="session-name-input" maxlength="100" required autocomplete="off">
+      <div class="dialog-actions">
+        <button type="button" id="cancel-session-button" class="button">取消</button>
+        <button type="submit" id="confirm-session-button" class="button primary">开始采集</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="export-dialog" class="dialog export-dialog" aria-labelledby="export-dialog-title">
+    <form id="export-form">
+      <h2 id="export-dialog-title">导出分析包</h2>
+      <p id="export-session-name" class="export-session-name"></p>
+      <fieldset class="export-modes">
+        <legend>数据格式</legend>
+        <label><input type="radio" name="export-encoding" value="delta" id="export-mode-delta" checked><span><strong>差分导出</strong><small>减少重复内容，附带还原脚本</small></span></label>
+        <label><input type="radio" name="export-encoding" value="full" id="export-mode-full"><span><strong>完整导出</strong><small>解压后直接读取完整时间线和快照</small></span></label>
+      </fieldset>
+      <label class="export-compression"><input type="checkbox" id="export-compression" checked>压缩 ZIP</label>
+      <p class="export-note">随包附带 restore.py 和 Agent 说明。导出期间可继续采集。</p>
+      <div class="dialog-actions">
+        <button type="button" id="cancel-export-dialog-button" class="button">取消</button>
+        <button type="submit" id="export-confirm-button" class="button primary">选择保存位置</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="help-dialog" class="dialog help-dialog">
+    <div class="help-top"><h2>使用说明</h2><button id="close-help-button" class="icon-button" aria-label="关闭使用说明" data-icon="close"></button></div>
+    <ol class="help-steps">
+      <li>输入网址，或打开演示页。</li>
+      <li>点击「开始采集」，在浏览器中完成操作。可暂停、继续或手动抓取快照。</li>
+      <li>导出 ZIP 并交给 Agent。默认差分压缩，包内说明会指导 Agent 用随附脚本还原；也可选择完整导出。</li>
+    </ol>
+    <p class="help-note">数据保存在本地，按原值采集，不做脱敏。跨域 iframe、封闭 Shadow DOM 和画布内部内容不完整覆盖；具体范围见导出说明。</p>
+    <button id="help-done-button" class="button primary">知道了</button>
+  </dialog>
+  <script src="app.js"></script>
+</body>
+</html>

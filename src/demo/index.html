@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; frame-src 'self' about:; img-src 'self' data:">
+  <title>交互实验室 · TraceDock</title>
+  <link rel="stylesheet" href="../shared/echoo-theme-tokens.css">
+  <link rel="stylesheet" href="demo.css">
+  <script src="demo.js" defer></script>
+</head>
+<body>
+  <main class="lab">
+    <nav class="lab-nav" aria-label="演示页面导航">
+      <a class="lab-brand" href="#overview"><img class="brand-logo" src="../shared/echootek-logo.svg" alt="EchooTek"> <span class="brand-divider"></span><span class="brand-caption">PLAYGROUND</span></a>
+      <span class="local-badge"><i></i> 本地演示</span>
+    </nav>
+    <header class="hero" id="overview">
+      <div class="eyebrow">INTERACTION LAB / 01</div>
+      <h1>每一次操作，<br>都有迹可循<span class="hero-dot">.</span></h1>
+      <p>从一个点击开始。试着输入、选择和更新页面，<br class="wide-only">在右侧时间线里，观察操作如何改变 DOM。</p>
+      <div class="hero-tags"><span>点击与输入</span><span>DOM 变更</span><span>状态快照</span></div>
+      <div class="hero-art" aria-hidden="true"><div class="art-orbit"></div><div class="art-window"><div class="art-top"><i></i><i></i><i></i></div><div class="art-row"></div><div class="art-row short"></div><div class="art-card"><b>↗</b><span>event captured</span><i></i></div><div class="art-row tiny"></div></div><div class="art-cursor">↖</div></div>
+    </header>
+
+    <div class="section-heading"><span>试一试这些交互</span><span class="section-meta">LIVE DOM · REAL EVENTS</span></div>
+    <div class="grid">
+      <section class="card form-card" id="form-section">
+        <div class="card-heading"><div><div class="card-kicker">01 / FORM EVENTS</div><h2>留下一条反馈</h2></div><span class="card-symbol mint">⌨</span></div>
+        <p class="card-description">输入值、选择项与表单提交，都会成为可分析的事件。</p>
+        <form id="feedback-form">
+          <div class="form-row"><label>称呼<input id="demo-name" name="name" autocomplete="off" placeholder="怎么称呼你？" required></label><label>邮箱<input id="demo-email" name="email" type="email" autocomplete="off" placeholder="hello@example.com"></label></div>
+          <div class="form-row"><label>反馈类型<select id="demo-category" name="category"><option value="experience">体验反馈</option><option value="feature">功能建议</option><option value="bug">问题报告</option></select></label><label>测试密码<input id="demo-password" name="password" type="password" autocomplete="new-password" placeholder="仅用于测试原值采集"></label></div>
+          <label>想法<textarea id="demo-note" name="note" rows="3" placeholder="试着在这里输入一些内容……"></textarea></label>
+          <div class="form-footer"><label class="checkbox"><input id="demo-followup" name="followup" type="checkbox"><span>接收后续进展</span></label><button type="submit" id="demo-submit" class="button primary">提交反馈 <span>↗</span></button></div>
+        </form>
+        <div id="form-result" class="result" aria-live="polite" hidden></div>
+      </section>
+
+      <section class="card counter-card" id="counter-section">
+        <div class="card-heading"><div><div class="card-kicker">02 / TEXT & ATTRIBUTES</div><h2>让页面发生变化</h2></div><span class="card-symbol lilac">±</span></div>
+        <p class="card-description">改变文本与属性，看看 DOM 记录的差异。</p>
+        <div class="counter"><button id="counter-decrease" class="counter-button" aria-label="减少计数">−</button><output id="counter-value" aria-live="polite">0</output><button id="counter-increase" class="counter-button" aria-label="增加计数">+</button></div>
+        <div class="counter-caption">每个变化，都值得被看见</div>
+        <div class="attribute-panel" id="attribute-panel" data-mode="calm"><span class="attribute-dot"></span><span id="attribute-label">状态：平静</span><button id="toggle-attribute" type="button">切换状态 ↗</button></div>
+        <a class="text-link" id="demo-route" href="#notes">试试页面内跳转 <span>↓</span></a>
+      </section>
+    </div>
+
+    <section class="card tasks-card" id="notes">
+      <div class="card-heading"><div><div class="card-kicker">03 / NODES & LIFECYCLE</div><h2>把想法变成待办</h2></div><span class="card-symbol blue">≡</span></div>
+      <p class="card-description">新增、完成或移除一项任务，观察节点如何加入和离开页面。</p>
+      <form id="task-form" class="task-entry"><input id="task-input" autocomplete="off" placeholder="下一步想探索什么？" aria-label="新待办事项"><button id="task-add" type="submit" class="button dark">添加事项 <span>+</span></button></form>
+      <ul id="task-list" class="task-list"><li class="task-item" data-task-id="1"><label><input type="checkbox" class="task-check"><span>录制一次完整的浏览器操作</span></label><button type="button" class="task-delete" aria-label="删除待办：录制一次完整的浏览器操作">×</button></li><li class="task-item" data-task-id="2"><label><input type="checkbox" class="task-check"><span>导出 ZIP，让 Agent 理解发生了什么</span></label><button type="button" class="task-delete" aria-label="删除待办：导出 ZIP，让 Agent 理解发生了什么">×</button></li></ul>
+      <div class="task-summary"><span id="task-count">2 项待办</span><span>新增 / 删除 / 属性变化</span></div>
+    </section>
+
+    <div class="section-heading advanced-heading"><span>深入页面结构</span><span class="section-meta">SHADOW DOM & FRAME</span></div>
+    <div class="grid advanced-grid">
+      <section class="card compact-card"><div class="card-kicker">04 / OPEN SHADOW ROOT</div><h2>组件中的交互</h2><p class="card-description">这个按钮位于一个开放的 Shadow DOM 内。</p><div id="shadow-host"></div></section>
+      <section class="card compact-card"><div class="card-kicker">05 / SAME-ORIGIN FRAME</div><h2>页面中的页面</h2><p class="card-description">在可访问的内嵌文档中输入内容。</p><iframe id="demo-frame" title="同源 iframe 采集演示"></iframe></section>
+    </div>
+    <footer class="lab-footer"><span><b>TraceDock</b> · 让浏览过程成为可读的上下文</span><a href="#overview">回到顶部 ↑</a><p>演示数据仅保留在此页面；录制内容由桌面应用保存在本机。首版记录原始数据，不做脱敏。</p></footer>
+  </main>
+</body>
+</html>
