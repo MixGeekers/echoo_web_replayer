@@ -1,3 +1,6 @@
+import type { ProfileMetadata } from "./profile";
+import type { SessionGroupMetadata } from "./session-group";
+export type { SessionGroupMetadata } from "./session-group";
 import type {
   SessionMetadata,
   EventPreview,
@@ -12,6 +15,8 @@ import type {
 } from "./storage";
 import type { ExportProgress, ExportResult } from "./export";
 import type { ResourceSummary } from "./resources";
+import type { LibraryBatchInput } from "./library";
+export type { LibraryBatchAction, LibraryBatchInput } from "./library";
 export type {
   SessionMetadata,
   EventPreview,
@@ -20,6 +25,7 @@ export type {
   ExportResult,
 };
 export interface BrowserState {
+  available: boolean;
   url: string;
   title: string;
   loading: boolean;
@@ -28,6 +34,9 @@ export interface BrowserState {
   error: string | null;
 }
 export interface AppState {
+  profiles: ProfileMetadata[];
+  sessionGroups: SessionGroupMetadata[];
+  activeProfileId: string | null;
   browser: BrowserState;
   session: SessionMetadata | null;
   sessions: SessionMetadata[];
@@ -55,6 +64,29 @@ export interface ExportOptions {
 }
 export interface CollectorAPI {
   getState(): Promise<AppState>;
+  batchLibrary(input: LibraryBatchInput): Promise<AppState>;
+  createSessionGroup(input: {profileId: string; name: string}): Promise<AppState>;
+  renameSessionGroup(input: {sessionGroupId: string; name: string}): Promise<AppState>;
+  closeSessionGroup(sessionGroupId: string): Promise<AppState>;
+  reopenSessionGroup(sessionGroupId: string): Promise<AppState>;
+  archiveSessionGroup(sessionGroupId: string): Promise<AppState>;
+  unarchiveSessionGroup(sessionGroupId: string): Promise<AppState>;
+  trashSessionGroup(sessionGroupId: string): Promise<AppState>;
+  restoreSessionGroup(sessionGroupId: string): Promise<AppState>;
+  deleteSessionGroup(sessionGroupId: string): Promise<AppState>;
+  createProfile(name: string): Promise<AppState>;
+  renameProfile(input: {profileId: string; name: string}): Promise<AppState>;
+  switchProfile(profileId: string): Promise<AppState>;
+  closeProfile(): Promise<AppState>;
+  deleteProfile(profileId: string): Promise<AppState>;
+  clearProfileData(input: {profileId: string; kind: "cache" | "storage"}): Promise<AppState>;
+  renameSession(input: {sessionId: string; name: string}): Promise<AppState>;
+  archiveSession(sessionId: string): Promise<AppState>;
+  unarchiveSession(sessionId: string): Promise<AppState>;
+  trashSession(sessionId: string): Promise<AppState>;
+  restoreSession(sessionId: string): Promise<AppState>;
+  deleteSession(sessionId: string): Promise<AppState>;
+  setReplaySession(sessionId: string | null): Promise<void>;
   getTimeline(input: TimelineQuery): Promise<TimelinePage>;
   getEvent(input: {
     sessionId: string;
@@ -73,7 +105,7 @@ export interface CollectorAPI {
   forward(): Promise<void>;
   reload(): Promise<void>;
   home(): Promise<{ url: string }>;
-  startSession(name: string): Promise<SessionMetadata>;
+  startSession(input: {sessionGroupId: string; name: string}): Promise<SessionMetadata>;
   pauseSession(): Promise<SessionMetadata>;
   resumeSession(): Promise<SessionMetadata>;
   stopSession(): Promise<SessionMetadata | null>;

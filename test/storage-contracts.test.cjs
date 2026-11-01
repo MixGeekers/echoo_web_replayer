@@ -9,19 +9,20 @@ const { execFile } = require('node:child_process');
 const { SessionStore } = require('../out/session-store.cjs');
 const { exportSession } = require('../out/exporter.cjs');
 
-test('legacy event envelopes and unknown payloads remain readable and export byte-for-byte after typed migration', async t => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'tracedock-legacy-'));
+test('current event envelopes and unknown payloads remain readable and export byte-for-byte', async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'tracedock-contract-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const recordings = path.join(directory, 'recordings');
   const original = await new SessionStore(recordings).init();
-  const session = await original.create('Legacy');
+  const session = await original.create('Current baseline', '', { id: 'profile-00000000-0000-4000-8000-000000000001', name: '测试环境' }, 'group-00000000-0000-4000-8000-000000000001');
   await original.update(session.id, {status:'stopped'});
   const filename = path.join(original.getSessionDirectory(session.id), 'timeline.jsonl');
   const facts = [
-    {seq:1,type:'dom.snapshot',payload:{html:'<html><body>旧记录</body></html>',tree:{nodeType:9,nodeId:'n1',children:[]}}},
+    {seq:1,type:'dom.snapshot',payload:{html:'<html><body>当前记录</body></html>',tree:{nodeType:9,nodeId:'n1',children:[]}}},
     {seq:2,type:'vendor.unknown',payload:['secret',null,42,{nested:{custom:'原样😀'}}],extension:{version:99}},
     {seq:3,type:'action.input',payload:null},
   ];
+  for (const event of facts) Object.assign(event, {id:`${session.id}:${String(event.seq).padStart(8,'0')}`,sessionId:session.id,timestamp:session.startedAt,receivedAt:session.startedAt,elapsedMs:0,documentId:null,url:'',title:'',summary:''});
   const raw = Buffer.from(facts.map(value => JSON.stringify(value)).join('\r\n') + '\r\n');
   await fs.writeFile(filename, raw);
   const store = await new SessionStore(recordings).init();
@@ -38,8 +39,6 @@ test('legacy event envelopes and unknown payloads remain readable and export byt
   assert.equal(chunk.events[1].elapsedMs,0);
   assert.deepEqual(await fs.readFile(filename),raw);
   const capture = await store.capture(session.id);
-  // Older callers supplied captures before static-resource metadata existed.
-  delete capture.resourcePath; delete capture.resourceBytes;
   for (const encoding of ['full','delta']) {
     const destination = path.join(directory,`${encoding}.zip`);
     await exportSession({capture,sessionId:session.id,destination,encoding});

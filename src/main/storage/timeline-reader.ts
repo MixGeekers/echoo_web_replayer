@@ -50,6 +50,14 @@ export class TimelineReader {
   private searches = new Map<string, SearchCache>();
   private searchQueue: Promise<unknown> = Promise.resolve();
   constructor(private host: ReadHost) {}
+  async invalidate(id: string) {
+    await this.searchQueue;
+    for (const [key, cache] of this.searches) {
+      if ((JSON.parse(key) as unknown[])[0] !== id) continue;
+      await fs.rm(cache.path, { force: true });
+      this.searches.delete(key);
+    }
+  }
   private capture(id: string) {
     return this.host.capture(id);
   }

@@ -106,7 +106,12 @@ async function run() {
         && getComputedStyle(document.body).color === 'rgb(37, 99, 235)', page);
     }
     async function start(name) {
-      const session = await ui.evaluate(label => window.collector.startSession(label), name);
+      const session = await ui.evaluate(async label => {
+        const initial = await window.collector.getState();
+        const created = await window.collector.createSessionGroup({ profileId: initial.activeProfileId, name: label });
+        const group = created.sessionGroups.find(value => value.profileId === initial.activeProfileId && value.name === label);
+        return window.collector.startSession({ sessionGroupId: group.id, name: label });
+      }, name);
       await ui.waitForFunction(async id => {
         const state = await window.collector.getState();
         return state.session?.id === id && state.session.snapshotCount > 0;
@@ -119,7 +124,7 @@ async function run() {
     async function checkCatalog(id, expectedURLs) {
       await until(async () => (await summary(id)).saved >= expectedURLs.length, `resources for ${id}`);
       const status = await summary(id);
-      const entries = (await fs.readFile(path.join(data, 'recordings', id, 'resources.jsonl'), 'utf8'))
+      const entries = (await fs.readFile(path.join(data, 'workspace-v3', 'recordings', id, 'resources.jsonl'), 'utf8'))
         .trim().split('\n').map(line => JSON.parse(line));
       assert.equal(status.saved, expectedURLs.length);
       assert.equal(status.missing, 0);
@@ -128,7 +133,7 @@ async function run() {
       assert.equal(entries.length, expectedURLs.length, 'no stale entries or duplicate resource records');
       assert.deepEqual(entries.map(entry => entry.url).sort(), [...expectedURLs].sort());
       assert.ok(entries.every(entry => entry.status === 'saved' && /^[a-f0-9]{64}$/.test(entry.sha256)));
-      for (const entry of entries) assert.equal((await fs.stat(path.join(data, 'recordings', id, 'assets', entry.sha256))).size, entry.bytes);
+      for (const entry of entries) assert.equal((await fs.stat(path.join(data, 'workspace-v3', 'recordings', id, 'assets', entry.sha256))).size, entry.bytes);
       return { ...status, urls: entries.map(entry => entry.url).sort() };
     }
 

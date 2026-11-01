@@ -13,6 +13,7 @@ interface Options {
   browser: WebContentsView;
   browserState: BrowserState;
   appVersion: string;
+  profile: () => {id: string; name: string};
   notify: () => void;
   reportError: (error: unknown) => void;
   publish: (event: EventNotice) => void;
@@ -23,6 +24,7 @@ export function createRecordingController({
   browser,
   browserState,
   appVersion,
+  profile,
   notify,
   reportError,
   publish,
@@ -38,7 +40,7 @@ export function createRecordingController({
     return activeId;
   }
   function currentSession() {
-    return activeId ? store.getSession(activeId) : null;
+    return activeId && store.sessions.has(activeId) ? store.getSession(activeId) : null;
   }
   function recordingState() {
     const s = currentSession();
@@ -127,15 +129,14 @@ export function createRecordingController({
       return false;
     }
   }
-  async function startSession(name: unknown) {
+  async function startSession(input: {name: string; sessionGroupId: string}) {
     const current = currentSession();
     if (current && ["recording", "paused"].includes(current.status))
       throw new Error("请先结束当前会话");
-    const label =
-      typeof name === "string" && name.trim()
-        ? name.trim().slice(0, 160)
-        : `采集会话 ${new Date().toLocaleString("zh-CN", { hour12: false })}`;
-    const session = await store.create(label, browserState.url);
+    if (typeof input.name !== "string" || !input.name.trim() || input.name.trim().length > 160)
+      throw new Error("采集名称须为 1–160 个字符");
+    const label = input.name.trim();
+    const session = await store.create(label, browserState.url, profile(), input.sessionGroupId);
     activeId = session.id;
     await append("session.start", {
       name: label,

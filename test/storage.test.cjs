@@ -22,7 +22,7 @@ async function setup(t) {
 
 test('concurrent writes preserve sequence, raw values, filtered pagination and metadata', async t => {
   const { store } = await setup(t);
-  const session = await store.create('完整记录', 'https://example.test');
+  const session = await store.create('完整记录', 'https://example.test', { id: 'profile-00000000-0000-4000-8000-000000000001', name: '测试环境' }, 'group-00000000-0000-4000-8000-000000000001');
   const records = await Promise.all([
     store.append(session.id, { type: 'action.input', payload: { value: '秘密密码', target: { selector: '#password' } } }),
     store.append(session.id, { type: 'dom.mutation', payload: { records: [{ type: 'attributes', oldValue: 'old', value: 'new' }] } }),
@@ -46,7 +46,7 @@ test('concurrent writes preserve sequence, raw values, filtered pagination and m
 
 test('restart recovers durable counters and marks incomplete recordings interrupted', async t => {
   const { store } = await setup(t);
-  const session = await store.create('恢复测试');
+  const session = await store.create('恢复测试', '', { id: 'profile-00000000-0000-4000-8000-000000000001', name: '测试环境' }, 'group-00000000-0000-4000-8000-000000000001');
   await store.append(session.id, { type: 'action.click', payload: { target: { selector: '#ok' } } });
   const metadataPath = path.join(store.getSessionDirectory(session.id), 'session.json');
   const staleMetadata = store.getSession(session.id);
@@ -65,7 +65,7 @@ test('restart recovers durable counters and marks incomplete recordings interrup
 
 test('truncated tail is recovered with original bytes retained', async t => {
   const { store } = await setup(t);
-  const session = await store.create('崩溃恢复');
+  const session = await store.create('崩溃恢复', '', { id: 'profile-00000000-0000-4000-8000-000000000001', name: '测试环境' }, 'group-00000000-0000-4000-8000-000000000001');
   await store.append(session.id, { type: 'action.click', payload: {} });
   await fs.appendFile(path.join(store.getSessionDirectory(session.id), 'timeline.jsonl'), '{"seq":2,"type":');
   const recovered = await new SessionStore(store.rootDir).init();
@@ -77,7 +77,7 @@ test('truncated tail is recovered with original bytes retained', async t => {
 
 test('ZIP includes full timeline, raw snapshot state, guide and verifiable hashes at a fixed boundary', async t => {
   const { directory, store } = await setup(t);
-  const session = await store.create('ZIP 检查', 'https://example.test');
+  const session = await store.create('ZIP 检查', 'https://example.test', { id: 'profile-00000000-0000-4000-8000-000000000001', name: '测试环境' }, 'group-00000000-0000-4000-8000-000000000001');
   const html = '<html><body><input id="secret" type="password"><div>完整 DOM 内容</div></body></html>';
   const snapshot = await store.append(session.id, { type: 'dom.snapshot', documentId: 'doc-1', payload: { reason: 'start', html, tree: { id: 'n1' }, forms: [{ value: 'raw-password-123' }], frames: [], shadowRoots: [], coverage: { mainDocument: true } } });
   await store.append(session.id, { type: 'action.input', payload: { value: '原始值' } });
@@ -120,7 +120,7 @@ test('ZIP includes full timeline, raw snapshot state, guide and verifiable hashe
 
 test('failed export preserves an existing destination and cleans temporary data', async t => {
   const { directory, store } = await setup(t);
-  const session = await store.create('失败测试');
+  const session = await store.create('失败测试', '', { id: 'profile-00000000-0000-4000-8000-000000000001', name: '测试环境' }, 'group-00000000-0000-4000-8000-000000000001');
   await store.append(session.id, { type: 'action.click', payload: {} });
   const destination = path.join(directory, 'existing.zip');
   await fs.writeFile(destination, 'original file');

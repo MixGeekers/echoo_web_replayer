@@ -43,9 +43,8 @@ export interface ExportSignals {
 }
 export type ExportCapture = Pick<
   SessionCapture,
-  "metadata" | "timelinePath" | "byteLength" | "capturedAt"
-> &
-  Partial<Pick<SessionCapture, "resourcePath" | "resourceBytes">>;
+  "metadata" | "timelinePath" | "byteLength" | "capturedAt" | "resourcePath" | "resourceBytes"
+>;
 export interface PreparedExport extends ExportOptions, ExportSignals {
   capture: ExportCapture;
   sessionId: string;

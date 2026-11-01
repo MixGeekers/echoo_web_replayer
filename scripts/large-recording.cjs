@@ -149,7 +149,7 @@ async function generate(directory, config) {
   await close(stream);
   const metadata = { id: sessionId, name: '合成超大记录验收', status: 'stopped', startedAt, updatedAt: startedAt, endedAt: startedAt,
     url: 'https://large-fixture.example.test/中文', eventCount: seq, actionCount: numberOfSnapshots, mutationCount: 0,
-    snapshotCount: numberOfSnapshots, lastSeq: seq, lastElapsedMs: seq * 100, schemaVersion: 1 };
+    snapshotCount: numberOfSnapshots, lastSeq: seq, lastElapsedMs: seq * 100, schemaVersion: 3, sessionGroupId:'group-00000000-0000-4000-8000-000000000001', profileId:'profile-00000000-0000-4000-8000-000000000001', profileName:'测试环境', libraryState:'active', archivedAt:null, trashedAt:null, trashOrigin:null };
   await fsp.writeFile(path.join(sessionDirectory, 'session.json'), JSON.stringify(metadata, null, 2) + '\n');
   const fixture = { synthetic: true, composition: 'approximately 90% repeated DOM, 10% fresh random hex, UTF-8 and escaped raw form values',
     requestedGiB: config.gib, eventMiB: config.eventMiB, sessionsRoot, sessionId, timelinePath,

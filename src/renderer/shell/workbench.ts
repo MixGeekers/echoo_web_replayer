@@ -1,3 +1,4 @@
+import { createLifecycleUI } from "./lifecycle";
 import { createTimeline } from "./timeline";
 import { createExportUI } from "./export";
 import { formatDate, count, statusName } from "./format";
@@ -12,6 +13,7 @@ export function startWorkbench(): void {
   const api = window.collector;
   let state: AppState = {
     browser: {
+      available: false,
       url: "",
       title: "",
       loading: false,
@@ -19,13 +21,18 @@ export function startWorkbench(): void {
       canGoForward: false,
       error: null,
     },
+    profiles: [],
+    activeProfileId: null,
     session: null,
     sessions: [],
+    sessionGroups: [],
     export: null,
   };
   let selectedSessionId: string | null = null;
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
   let sessionSignature = "";
+  let recordingGroupId = "";
+  const collapsedGroups = new Set<string>();
   let busy = false;
   let exportToastSessionId: string | null = null;
   let boundsFrame = 0;
@@ -45,7 +52,7 @@ export function startWorkbench(): void {
     state.sessions.find((s) => s.id === selectedSessionId) ||
     (state.session?.id === selectedSessionId ? state.session : null);
   const timeline = createTimeline(api, replay, {
-    sessionId: () => selectedSessionId,
+    sessionId: () => selectedSession() && lifecycle.effectiveState(selectedSession()!) === "trashed" ? null : selectedSessionId,
     selectedSession,
     state: () => state,
     active,
@@ -56,6 +63,27 @@ export function startWorkbench(): void {
     selectedSession,
     state: () => state,
     renderState,
+    showDialog,
+    closeDialog,
+    notify,
+  });
+
+  const lifecycle = createLifecycleUI({
+    state: () => state,
+    selectedSession,
+    busy: () => busy,
+    setBusy: value => { busy = value; renderState(); },
+    update: handleState,
+    changed: () => {
+      void replay.close().catch(error => notify("操作未完成", message(error), true));
+      selectedSessionId = null;
+      timeline.clear();
+      void timeline.refresh(true);
+      handleState(state);
+    },
+    repaint: renderState,
+    closeReplay: () => replay.close(),
+    replaySessionId: () => replay.sessionId,
     showDialog,
     closeDialog,
     notify,
@@ -109,6 +137,7 @@ export function startWorkbench(): void {
         width: Math.max(0, Math.round(rect.width)),
         height: Math.max(0, Math.round(rect.height)),
         visible:
+          state.browser.available &&
           !replay.active &&
           !document.querySelector("dialog[open]") &&
           !document.hidden,
@@ -134,9 +163,11 @@ export function startWorkbench(): void {
     scheduleBounds();
   }
 
-  function newSession() {
-    if (active() || busy) return;
-    if (replay.active) replay.close();
+  async function newSession() {
+    if (active() || busy || !lifecycle.canCapture()) return;
+    if (replay.active) await replay.close();
+    recordingGroupId = lifecycle.selectedGroupId;
+    el("recording-parent-label", "p").textContent = `保存到 Session：${lifecycle.selectedGroup()?.name || ""}`;
     el("session-name-input", "input").value =
       `浏览器采集 · ${new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date())}`;
     showDialog(el("session-dialog", "dialog"));
@@ -145,53 +176,97 @@ export function startWorkbench(): void {
 
   function renderSessions() {
     const sig = JSON.stringify([
-      selectedSessionId,
-      state.sessions.map((s) => [s.id, s.name, s.status, s.startedAt]),
+      selectedSessionId, lifecycle.selectedGroupId, lifecycle.scope, lifecycle.profileFilter,
+      [...collapsedGroups], state.sessionGroups, lifecycle.library.signature,
+      state.sessions.map(s => [s.id, s.name, s.status, s.startedAt, s.libraryState, s.sessionGroupId]),
     ]);
     if (sig === sessionSignature) return;
     sessionSignature = sig;
-    el("session-total", "span").textContent = String(state.sessions.length);
+    const groups = lifecycle.visibleGroups(), records = lifecycle.visibleSessions();
+    el("session-total", "span").textContent = String(groups.length);
     const fragment = document.createDocumentFragment();
-    if (!state.sessions.length) {
+    if (!groups.length) {
       const empty = document.createElement("div");
       empty.className = "sidebar-empty";
-      empty.textContent = "暂无会话";
+      empty.textContent = lifecycle.library.hasFilters ? "没有匹配的内容" : lifecycle.scope === "trashed" ? "回收站为空" : lifecycle.scope === "archived" ? "暂无归档内容" : "还没有 Session";
+      if (lifecycle.library.hasFilters) {
+        const reset = document.createElement("button"); reset.type = "button"; reset.className = "text-button"; reset.textContent = "清除筛选";
+        reset.addEventListener("click", lifecycle.library.resetFilters); empty.append(reset);
+      }
       fragment.append(empty);
     }
-    [...state.sessions]
-      .sort(
-        (a, b) =>
-          new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime(),
-      )
-      .forEach((session) => {
-        const button = document.createElement("button");
-        button.className = `session-item${session.id === selectedSessionId ? " selected" : ""}`;
-        button.title = session.name;
-        button.setAttribute(
-          "aria-pressed",
-          String(session.id === selectedSessionId),
-        );
-        const icon = document.createElement("span");
-        icon.className = "session-item-icon";
-        icon.innerHTML = svg("document");
-        const body = document.createElement("span");
-        body.className = "session-item-body";
-        const name = document.createElement("span");
-        name.className = "session-name";
-        name.textContent = session.name || "未命名会话";
-        const date = document.createElement("span");
-        date.className = "session-date";
-        const status = document.createElement("span");
-        const dot = document.createElement("i");
-        dot.className = `session-state-dot ${session.status}`;
-        status.append(dot, statusName(session.status));
-        date.append(status, "·", formatDate(session.startedAt));
-        body.append(name, date);
-        button.append(icon, body);
-        button.addEventListener("click", () => selectSession(session.id));
-        fragment.append(button);
+    for (const group of groups) {
+      const section = document.createElement("section");
+      section.className = `session-group${group.id === lifecycle.selectedGroupId ? " current" : ""}`;
+      section.dataset.sessionGroupId = group.id;
+      const children = records.filter(record => record.sessionGroupId === group.id);
+      const row = document.createElement("div"); row.className = "session-group-row";
+      const toggle = document.createElement("button");
+      toggle.type = "button"; toggle.className = "session-group-toggle icon-button";
+      toggle.innerHTML = svg("chevron-down");
+      const expanded = lifecycle.library.hasFilters || !collapsedGroups.has(group.id);
+      toggle.disabled = lifecycle.library.hasFilters;
+      toggle.setAttribute("aria-expanded", String(expanded));
+      toggle.setAttribute("aria-label", `${expanded ? "折叠" : "展开"} ${group.name}`);
+      toggle.addEventListener("click", () => {
+        if (collapsedGroups.has(group.id)) collapsedGroups.delete(group.id); else collapsedGroups.add(group.id);
+        renderSessions();
       });
-    el("session-list", "div").replaceChildren(fragment);
+      const button = document.createElement("button");
+      button.type = "button"; button.className = `session-group-select${group.id === lifecycle.selectedGroupId && !selectedSessionId ? " selected" : ""}`;
+      button.dataset.sessionGroupId = group.id; button.title = group.name;
+      button.setAttribute("aria-pressed", String(group.id === lifecycle.selectedGroupId && !selectedSessionId));
+      const name = document.createElement("span"); name.className = "group-name"; name.textContent = group.name;
+      const meta = document.createElement("span"); meta.className = "group-row-meta";
+      meta.textContent = `${group.libraryState === "trashed" ? "已删除" : group.libraryState === "archived" ? "已归档" : group.status === "closed" ? "已关闭" : "已打开"} · ${children.length} 条${lifecycle.library.hasFilters ? "匹配" : ""}记录`;
+      button.append(name, meta);
+      if (lifecycle.library.allProfiles) {
+        const source = document.createElement("span"); source.className = "group-profile-source";
+        source.textContent = lifecycle.profileName(group.profileId, group.profileName); source.title = source.textContent; button.append(source);
+      }
+      button.addEventListener("click", () => {
+        lifecycle.chooseGroup(group.id); collapsedGroups.delete(group.id);
+        selectedSessionId = null; timeline.clear();
+        void timeline.refresh(true);
+        void replay.close().catch(error => notify("操作未完成", message(error), true));
+        handleState(state);
+      });
+      if (lifecycle.library.selecting) row.append(lifecycle.library.groupCheckbox(group.id, group.name));
+      row.append(toggle, button); section.append(row);
+      const branch = document.createElement("div"); branch.className = "session-group-records"; branch.hidden = !expanded;
+      for (const session of children) {
+        const item = document.createElement("button");
+        item.type = "button"; item.className = `session-item${session.id === selectedSessionId ? " selected" : ""}`;
+        item.dataset.recordingId = session.id; item.title = session.name;
+        item.setAttribute("aria-pressed", String(session.id === selectedSessionId));
+        const icon = document.createElement("span"); icon.className = "session-item-icon"; icon.innerHTML = svg("document");
+        const body = document.createElement("span"); body.className = "session-item-body";
+        const name = document.createElement("span"); name.className = "session-name"; name.textContent = session.name;
+        const date = document.createElement("span"); date.className = "session-date";
+        const status = document.createElement("span"), dot = document.createElement("i");
+        dot.className = `session-state-dot ${session.status}`;
+        status.append(dot, statusName(session.status)); date.append(status, "·", formatDate(session.startedAt));
+        body.append(name, date); item.append(icon, body);
+        item.addEventListener("click", () => selectSession(session.id));
+        if (lifecycle.library.selecting) {
+          const selectableRow = document.createElement("div"); selectableRow.className = "library-record-row";
+          selectableRow.append(lifecycle.library.recordCheckbox(session), item); branch.append(selectableRow);
+        } else branch.append(item);
+      }
+      if (!children.length) {
+        const empty = document.createElement("span"); empty.className = "group-empty"; empty.textContent = lifecycle.library.hasFilters ? "无匹配的采集记录" : "暂无采集记录"; branch.append(empty);
+      }
+      section.append(branch); fragment.append(section);
+    }
+    const list = el("session-list", "div"), scroll = list.scrollTop;
+    const focused = document.activeElement instanceof HTMLInputElement && list.contains(document.activeElement) ?
+      {group:document.activeElement.dataset.selectGroup, record:document.activeElement.dataset.selectRecord} : null;
+    list.replaceChildren(fragment); list.scrollTop = scroll;
+    if (focused) {
+      const replacement = [...list.querySelectorAll<HTMLInputElement>(".library-checkbox")].find(input =>
+        focused.group ? input.dataset.selectGroup === focused.group : input.dataset.selectRecord === focused.record);
+      replacement?.focus({preventScroll:true});
+    }
   }
 
   function renderDuration() {
@@ -232,9 +307,8 @@ export function startWorkbench(): void {
       ? `当前录制：${state.session?.name}`
       : "当前没有录制任务";
     el("start-button", "button").hidden = Boolean(currentActive);
-    el("start-button", "button").disabled = busy;
-    el("new-session-button", "button").disabled =
-      Boolean(currentActive) || busy;
+    el("start-button", "button").disabled = busy || !lifecycle.canCapture();
+    el("start-button", "button").title = lifecycle.canCapture() ? `在 ${lifecycle.selectedGroup()?.name} 中新建采集记录` : lifecycle.scope !== "active" ? "先切换到常用，再选择一个已打开的 Session" : "先选择一个已打开的 Session";
     el("pause-button", "button").hidden = !currentActive;
     el("stop-button", "button").hidden = !currentActive;
     el("pause-button", "button").disabled = busy;
@@ -249,14 +323,14 @@ export function startWorkbench(): void {
       `${paused ? "继续" : "暂停"}：${state.session?.name || "当前会话"}`;
     el("stop-button", "button").title =
       `结束：${state.session?.name || "当前会话"}`;
-    el("export-button", "button").disabled = !session || exportUI.busy || busy;
-    el("replay-button", "button").disabled = !session?.snapshotCount || busy;
+    el("export-button", "button").disabled = !session || lifecycle.effectiveState(session) === "trashed" || exportUI.busy || busy;
+    el("replay-button", "button").disabled = !session?.snapshotCount || lifecycle.effectiveState(session) === "trashed" || busy;
     el("export-button", "button").title = session
-      ? `导出所选会话：${session.name}`
-      : "先选择一个会话";
+      ? `导出所选采集记录：${session.name}`
+      : "先选择一条采集记录";
     el("snapshot-button", "button").disabled = !recording || busy || historical;
     el("snapshot-button", "button").title = historical
-      ? "请先选中正在录制的会话，再捕获快照"
+      ? "请先选中正在采集的记录，再捕获快照"
       : recording
         ? `捕获当前页面快照 · ${state.session?.name}`
         : "录制时可捕获当前页面快照";
@@ -266,7 +340,7 @@ export function startWorkbench(): void {
     el("current-session-subtitle", "span").hidden = !session;
     el("current-session-subtitle", "span").textContent = session
       ? historical
-        ? "查看历史会话 · 录制按钮控制当前采集"
+        ? "查看历史记录 · 采集按钮控制当前任务"
         : `${statusName(session.status)} · ${formatDate(session.startedAt)}`
       : "";
     el("current-session-subtitle", "span").title = historical
@@ -290,15 +364,20 @@ export function startWorkbench(): void {
     );
     if (document.activeElement !== el("address-input", "input"))
       el("address-input", "input").value = browser.url || "";
-    el("back-button", "button").disabled = !browser.canGoBack;
-    el("forward-button", "button").disabled = !browser.canGoForward;
+    el("browser-placeholder", "div").hidden = browser.available || replay.active;
+    el("browser-placeholder", "div").textContent = "浏览环境已关闭 · 从顶部打开或新建 Profile";
+    el("address-input", "input").disabled = !browser.available || busy;
+    el("reload-button", "button").disabled = !browser.available || busy;
+    el("home-button", "button").disabled = !browser.available || busy;
+    el("back-button", "button").disabled = !browser.available || !browser.canGoBack;
+    el("forward-button", "button").disabled = !browser.available || !browser.canGoForward;
     el("reload-button", "button").classList.toggle(
       "loading",
       Boolean(browser.loading),
     );
     el("browser-error", "div").hidden = replay.active || !browser.error;
     el("browser-error-text", "span").textContent = browser.error || "";
-    el("page-status", "span").textContent = browser.error
+    el("page-status", "span").textContent = !browser.available ? "浏览环境已关闭" : browser.error
       ? "页面加载失败，可修改地址后重试"
       : browser.loading
         ? "页面加载中…"
@@ -309,6 +388,7 @@ export function startWorkbench(): void {
         ? "loading"
         : "";
     renderDuration();
+    lifecycle.render();
     renderSessions();
     scheduleBounds();
   }
@@ -317,10 +397,12 @@ export function startWorkbench(): void {
     const previousSelected = selectedSessionId;
     const previousSession = selectedSession();
     state = next;
-    if (!Array.isArray(state.sessions)) state.sessions = [];
+    lifecycle.sync();
     if (state.export) exportUI.update(state.export);
-    if (!selectedSessionId || !selectedSession())
-      selectedSessionId = state.session?.id || state.sessions[0]?.id || null;
+    if (selectedSessionId && !lifecycle.visibleSessions().some(s => s.id === selectedSessionId && s.sessionGroupId === lifecycle.selectedGroupId)) {
+      selectedSessionId = null;
+      if (replay.active) void replay.close().catch(error => notify("操作未完成", message(error), true));
+    }
     renderState();
     const current = selectedSession();
     if (previousSelected !== selectedSessionId) timeline.refresh(true);
@@ -332,6 +414,8 @@ export function startWorkbench(): void {
   }
 
   function selectSession(id: string) {
+    lifecycle.chooseSession(id);
+    collapsedGroups.delete(lifecycle.selectedGroupId);
     if (id === selectedSessionId) return;
     selectedSessionId = id;
     timeline.clear();
@@ -340,17 +424,17 @@ export function startWorkbench(): void {
     timeline.refresh(true);
     if (replay.active) {
       const session = selectedSession();
-      if (session?.snapshotCount) replay.open(id, session.name);
-      else replay.close();
+      if (session?.snapshotCount && lifecycle.effectiveState(session) !== "trashed") void replay.open(id, session.name);
+      else void replay.close().catch(error => notify("操作未完成", message(error), true));
     }
   }
 
-  el("start-button", "button").addEventListener("click", newSession);
+  el("start-button", "button").addEventListener("click", () => { void run(newSession); });
   el("replay-button", "button").addEventListener("click", () => {
     const session = selectedSession();
-    if (session?.snapshotCount) replay.open(session.id, session.name);
+    if (session?.snapshotCount && lifecycle.effectiveState(session) !== "trashed") void replay.open(session.id, session.name);
   });
-  el("new-session-button", "button").addEventListener("click", newSession);
+  el("new-recording-button", "button").addEventListener("click", () => { void run(newSession); });
   el("session-form", "form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const name = el("session-name-input", "input").value.trim();
@@ -358,13 +442,19 @@ export function startWorkbench(): void {
     busy = true;
     el("confirm-session-button", "button").disabled = true;
     renderState();
-    const result = await run(() => api.startSession(name));
+    const result = await run(() => api.startSession({sessionGroupId: recordingGroupId, name}));
     busy = false;
     el("confirm-session-button", "button").disabled = false;
     if (result !== undefined) {
       closeDialog(el("session-dialog", "dialog"));
       const next = await run(() => api.getState());
       if (next) {
+        state = next;
+        if (next.session?.id) {
+          lifecycle.library.viewCurrentProfile();
+          lifecycle.library.resetFilters();
+          lifecycle.chooseSession(next.session.id);
+        }
         handleState(next);
         if (next.session?.id) selectSession(next.session.id);
       }

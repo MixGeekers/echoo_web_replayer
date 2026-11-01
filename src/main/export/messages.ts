@@ -32,14 +32,13 @@ export function readWorkerData(value: unknown): ExportWorkerData {
   const metadata = sessionMetadata(capture.metadata);
   const sessionId = string(raw.sessionId);
   if (metadata.id !== sessionId) throw new Error('导出截点与会话不一致');
-  const resourcePath = optionalString(capture.resourcePath), resourceBytes = optionalNumber(capture.resourceBytes);
+  const resourcePath = string(capture.resourcePath), resourceBytes = number(capture.resourceBytes);
   if (resourceBytes && !resourcePath) throw new Error('资源截点缺少索引路径');
   return {
     capture: {
       metadata, timelinePath: string(capture.timelinePath), byteLength: number(capture.byteLength),
       capturedAt: string(capture.capturedAt),
-      ...(resourcePath === undefined ? {} : {resourcePath}),
-      ...(resourceBytes === undefined ? {} : {resourceBytes}),
+      resourcePath, resourceBytes,
     },
     sessionId, destination: string(raw.destination), appVersion: optionalString(raw.appVersion),
     encoding: raw.encoding === undefined ? undefined : encoding(raw.encoding),

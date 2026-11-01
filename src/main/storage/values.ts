@@ -1,7 +1,6 @@
 import type {
   EventPreview,
   SessionMetadata,
-  SessionStatus,
   StoredEvent,
 } from "../../shared/contracts/storage";
 export function object(value: unknown): Record<string, unknown> {
@@ -53,74 +52,48 @@ export function preview(value: unknown): EventPreview {
     payloadTruncated: raw.payloadTruncated === true || undefined,
   };
 }
-/** Normalize legacy envelope omissions without interpreting or copying its arbitrary payload. */
-export function storedEvent(
-  value: unknown,
-  fallbackSessionId = "",
-): StoredEvent {
+/** Validate the current persisted event envelope without altering its payload. */
+export function storedEvent(value: unknown, expectedSessionId: string): StoredEvent {
   const { raw, seq, type } = envelope(value);
-  const sessionId = optionalString(raw.sessionId) ?? fallbackSessionId;
-  const timestamp = optionalString(raw.timestamp) ?? "";
-  return {
-    ...raw,
-    seq,
-    type,
-    sessionId,
-    id:
-      optionalString(raw.id) ?? `${sessionId}:${String(seq).padStart(8, "0")}`,
-    timestamp,
-    receivedAt: optionalString(raw.receivedAt) ?? timestamp,
-    elapsedMs: finiteNumber(raw.elapsedMs) ?? 0,
-    documentId: optionalString(raw.documentId) ?? null,
-    url: optionalString(raw.url) ?? "",
-    title: optionalString(raw.title) ?? "",
-    summary: optionalString(raw.summary) ?? "",
-    payload: raw.payload,
-  };
+  for (const key of ["id", "sessionId", "timestamp", "receivedAt", "url", "title", "summary"])
+    if (typeof raw[key] !== "string") throw new Error(`无效事件字段：${key}`);
+  if (raw.sessionId !== expectedSessionId ||
+      typeof raw.elapsedMs !== "number" || !Number.isFinite(raw.elapsedMs) || raw.elapsedMs < 0 ||
+      (raw.documentId !== null && typeof raw.documentId !== "string") ||
+      !Object.hasOwn(raw, "payload"))
+    throw new Error("无效事件信封");
+  return { ...raw, seq, type } as StoredEvent;
 }
 export function sessionMetadata(value: unknown): SessionMetadata {
   const raw = object(value);
-  if (
-    typeof raw.id !== "string" ||
-    typeof raw.name !== "string" ||
-    typeof raw.startedAt !== "string"
-  )
-    throw new Error("无效会话元数据");
-  let status: SessionStatus;
-  switch (raw.status) {
-    case "recording":
-    case "paused":
-    case "stopped":
-    case "interrupted":
-      status = raw.status;
-      break;
-    default:
-      throw new Error("无效会话状态");
+  if (raw.schemaVersion !== 3) throw new Error("仅支持当前基线的采集格式（schemaVersion 3）");
+  for (const key of ["id", "sessionGroupId", "name", "profileId", "profileName", "startedAt", "updatedAt", "url"])
+    if (typeof raw[key] !== "string") throw new Error(`无效会话字段：${key}`);
+  if (!/^group-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(raw.sessionGroupId as string))
+    throw new Error("无效采集 Session");
+  if (!(raw.name as string).trim() || !(raw.profileName as string).trim() ||
+      !/^profile-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(raw.profileId as string)) throw new Error("无效会话 Profile");
+  for (const key of ["startedAt", "updatedAt"])
+    if (!Number.isFinite(Date.parse(raw[key] as string))) throw new Error(`无效会话时间：${key}`);
+  for (const key of ["endedAt", "archivedAt", "trashedAt"])
+    if (raw[key] !== null && (typeof raw[key] !== "string" || !Number.isFinite(Date.parse(raw[key]))))
+      throw new Error(`无效会话时间：${key}`);
+  if (!["recording", "paused", "stopped", "interrupted"].includes(String(raw.status)))
+    throw new Error("无效会话状态");
+  if (!["active", "archived", "trashed"].includes(String(raw.libraryState)))
+    throw new Error("无效记录管理状态");
+  if (["recording", "paused"].includes(String(raw.status)) && raw.libraryState !== "active")
+    throw new Error("活动录制不能归档或删除");
+  if (raw.libraryState === "trashed") {
+    if (!["active", "archived"].includes(String(raw.trashOrigin)) || raw.trashedAt === null)
+      throw new Error("无效回收站元数据");
+  } else if (raw.trashOrigin !== null || raw.trashedAt !== null) {
+    throw new Error("无效回收站元数据");
   }
-  const count = (key: string, fallback?: number) => {
-    const value = raw[key] ?? fallback;
-    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0)
+  const archived = raw.libraryState === "archived" || raw.trashOrigin === "archived";
+  if (archived !== (raw.archivedAt !== null)) throw new Error("无效归档元数据");
+  for (const key of ["eventCount", "actionCount", "mutationCount", "snapshotCount", "lastSeq", "lastElapsedMs"])
+    if (typeof raw[key] !== "number" || !Number.isSafeInteger(raw[key]) || raw[key] < 0)
       throw new Error(`无效会话计数：${key}`);
-    return value;
-  };
-  return {
-    ...raw,
-    id: raw.id,
-    name: raw.name,
-    startedAt: raw.startedAt,
-    status,
-    updatedAt: optionalString(raw.updatedAt) ?? raw.startedAt,
-    endedAt: optionalString(raw.endedAt) ?? null,
-    url: optionalString(raw.url) ?? "",
-    eventCount: count("eventCount"),
-    actionCount: count("actionCount"),
-    mutationCount: count("mutationCount"),
-    snapshotCount: count("snapshotCount"),
-    lastSeq: count("lastSeq"),
-    lastElapsedMs: count("lastElapsedMs", 0),
-    schemaVersion: count("schemaVersion", 1),
-    recoveryFile: optionalString(raw.recoveryFile),
-    lastExportPath: optionalString(raw.lastExportPath),
-    lastExportAt: optionalString(raw.lastExportAt),
-  };
+  return { ...raw } as unknown as SessionMetadata;
 }

@@ -4,6 +4,8 @@ const jobs = [
   "typecheck",
   "test",
   "test:smoke",
+  "test:lifecycle",
+  "test:library",
   "test:replay",
   "test:resource-navigation",
   "test:export-desktop",

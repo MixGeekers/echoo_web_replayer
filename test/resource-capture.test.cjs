@@ -65,7 +65,7 @@ async function setup(t) {
     request(id, url); response(id, url); finish(id); await recorder.flush();
   };
   const start = async name => {
-    const session = await store.create(name, 'https://new.test/');
+    const session = await store.create(name, 'https://new.test/', { id: 'profile-00000000-0000-4000-8000-000000000001', name: '测试环境' }, 'group-00000000-0000-4000-8000-000000000001');
     await recorder.start(session.id); return session.id;
   };
   const empty = async id => {

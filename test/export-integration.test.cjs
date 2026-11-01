@@ -27,7 +27,7 @@ async function setup(t) {
 }
 
 async function fixture(store) {
-  const session = await store.create('差分一致性 · 原始数据', 'https://example.test/中文');
+  const session = await store.create('差分一致性 · 原始数据', 'https://example.test/中文', { id: 'profile-00000000-0000-4000-8000-000000000001', name: '测试环境' }, 'group-00000000-0000-4000-8000-000000000001');
   const html = `<html><body>${'<div data-key="unchanged">中文 😀 é &amp; 字节边界</div>'.repeat(3200)}</body></html>`;
   const payload = {
     reason: 'manual', html, tree: { id: 'n1', children: [{ id: 'n2', text: '😀' }] },
@@ -109,7 +109,7 @@ for (const encoding of ['delta', 'full']) {
 
 test('default delta export freezes its byte boundary while later recording continues', { timeout: 120000 }, async t => {
   const { directory, store } = await setup(t);
-  const session = await store.create('一致截点');
+  const session = await store.create('一致截点', '', { id: 'profile-00000000-0000-4000-8000-000000000001', name: '测试环境' }, 'group-00000000-0000-4000-8000-000000000001');
   await store.append(session.id, { type: 'action.input', payload: { value: '截点之前' } });
   const capture = await store.capture(session.id);
   const source = await fs.readFile(capture.timelinePath);

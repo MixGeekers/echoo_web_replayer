@@ -39,10 +39,18 @@ export interface EventPreview {
   [key: string]: unknown;
 }
 export type SessionStatus = "recording" | "paused" | "stopped" | "interrupted";
+export type LibraryState = "active" | "archived" | "trashed";
 export interface SessionMetadata {
   id: string;
+  sessionGroupId: string;
   name: string;
   status: SessionStatus;
+  profileId: string;
+  profileName: string;
+  libraryState: LibraryState;
+  archivedAt: string | null;
+  trashedAt: string | null;
+  trashOrigin: "active" | "archived" | null;
   startedAt: string;
   updatedAt: string;
   endedAt: string | null;

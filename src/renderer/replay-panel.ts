@@ -1,6 +1,7 @@
 import { ReplayController, type ReplaySource } from "../replay/controller";
 import { ReplayDOM } from "../replay/dom";
 import type { ReplayView, ReplayPointer } from "../replay/model";
+import type { CollectorAPI } from "../shared/contracts/ui";
 import type { ResourceSummary } from "../shared/contracts/resources";
 import { element as el } from "./shell/dom";
 const time = (value: number): string => {
@@ -11,13 +12,20 @@ export class ReplayPanel {
   private controller: ReplayController;
   private viewport = { width: 1000, height: 760 };
   private seekTimer: ReturnType<typeof setTimeout> | undefined;
-  get active(): boolean {
-    return this.controller.active;
+  private transition: Promise<void> = Promise.resolve();
+  private generation = 0;
+  private requestedSession: string | null = null;
+  get active(): boolean { return this.requestedSession !== null; }
+  get sessionId(): string | null { return this.requestedSession; }
+  private enqueue(task: () => Promise<void>): Promise<void> {
+    const operation = this.transition.then(task);
+    this.transition = operation.catch(() => {});
+    return operation;
   }
   constructor(
-    source: ReplaySource,
+    private source: ReplaySource & Pick<CollectorAPI, "setReplaySession">,
     private onMode: (active: boolean) => void,
-    onError: (error: Error) => void,
+    private onError: (error: Error) => void,
   ) {
     const dom = new ReplayDOM(
       el("replay-frame", "iframe"),
@@ -35,7 +43,7 @@ export class ReplayPanel {
       resources: (status) => this.resources(status),
       error: onError,
     });
-    el("replay-close", "button").addEventListener("click", () => this.close());
+    el("replay-close", "button").addEventListener("click", () => { void this.close().catch(this.onError); });
     el("replay-play", "button").addEventListener("click", () =>
       this.controller.playing
         ? this.controller.pause()
@@ -81,17 +89,37 @@ export class ReplayPanel {
     el("replay-panel", "section").hidden = false;
     el("replay-toolbar", "div").hidden = false;
     el("address-form", "form").hidden = true;
-    const opening = this.controller.open(sessionId);
+    const generation = ++this.generation;
+    this.requestedSession = sessionId;
+    this.controller.close();
     this.onMode(true);
-    return opening;
+    return this.enqueue(async () => {
+      if (generation !== this.generation) return;
+      try {
+        await this.source.setReplaySession(sessionId);
+        if (generation !== this.generation) return;
+        await this.controller.open(sessionId);
+        if (generation === this.generation && !this.controller.loaded) {
+          this.onError(new Error(el("replay-message", "div").textContent || "无法打开回放"));
+          void this.close().catch(this.onError);
+        }
+      } catch (error) {
+        if (generation !== this.generation) return;
+        this.onError(error instanceof Error ? error : new Error(String(error)));
+        void this.close().catch(this.onError);
+      }
+    });
   }
-  close(): void {
+  close(): Promise<void> {
+    this.generation++;
+    this.requestedSession = null;
     clearTimeout(this.seekTimer);
     this.controller.close();
     el("replay-panel", "section").hidden = true;
     el("replay-toolbar", "div").hidden = true;
     el("address-form", "form").hidden = false;
     this.onMode(false);
+    return this.enqueue(() => this.source.setReplaySession(null));
   }
   seek(timeMs?: number, targetSeq?: number): Promise<void> {
     clearTimeout(this.seekTimer);

@@ -55,6 +55,10 @@ async function run() {
     await guest.waitForURL(`${origin}/`);
     await guest.waitForFunction(() => document.querySelector('#logo')?.naturalWidth === 60);
     if (font) await guest.evaluate(() => document.fonts.load('16px ReplayTest'));
+    await ui.locator('#new-session-button').click();
+    await ui.locator('#management-name').fill('离线回放 Session');
+    await ui.locator('#management-confirm').click();
+    await ui.locator('#management-dialog').waitFor({ state: 'hidden' });
     await ui.locator('#start-button').click(); await ui.locator('#session-name-input').fill('离线回放验收'); await ui.locator('#confirm-session-button').click();
     await ui.waitForFunction(async () => (await window.collector.getState()).session?.snapshotCount > 0);
     await guest.locator('#note').fill('资源已经保存'); await guest.locator('#add').click();

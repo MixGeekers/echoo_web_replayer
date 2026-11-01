@@ -12,19 +12,20 @@ const { readWorkerData, readWorkerMessage, readWorkerCommand } = require(output)
 test.after(() => fs.rmSync(temporary, {recursive: true, force: true}));
 function startup() {
   return {sessionId:'s', destination:'recording.zip', encoding:'delta', compression:'deflate', capture:{
-    metadata:{id:'s',name:'test',status:'stopped',startedAt:'2026-11-01',eventCount:0,actionCount:0,mutationCount:0,snapshotCount:0,lastSeq:0},
-    timelinePath:'timeline.jsonl',byteLength:0,capturedAt:'2026-11-01',
+    metadata:{id:'s',name:'test',status:'stopped',startedAt:'2026-11-01',updatedAt:'2026-11-01',endedAt:'2026-11-01',url:'',schemaVersion:3,sessionGroupId:'group-00000000-0000-4000-8000-000000000001',lastElapsedMs:0,profileId:'profile-00000000-0000-4000-8000-000000000001', profileName:'测试环境', libraryState:'active', archivedAt:null, trashedAt:null, trashOrigin:null,eventCount:0,actionCount:0,mutationCount:0,snapshotCount:0,lastSeq:0},
+    timelinePath:'timeline.jsonl',byteLength:0,capturedAt:'2026-11-01',resourcePath:'resources.jsonl',resourceBytes:0,
   }};
 }
-test('worker startup validates captured byte boundaries and accepts pre-resource captures', () => {
+test('worker startup validates captured byte boundaries and requires the current capture shape', () => {
   assert.equal(readWorkerData(startup()).capture.byteLength,0);
+  const obsolete = startup(); delete obsolete.capture.resourceBytes; assert.throws(() => readWorkerData(obsolete));
   for (const byteLength of [-1,1.5,'0',Infinity]) {
     const input = startup(); input.capture.byteLength = byteLength;
     assert.throws(() => readWorkerData(input), /非负安全整数/);
   }
   const wrongSession = startup(); wrongSession.sessionId = 'another';
   assert.throws(() => readWorkerData(wrongSession), /会话不一致/);
-  const missingResourcePath = startup(); missingResourcePath.capture.resourceBytes = 100;
+  const missingResourcePath = startup(); missingResourcePath.capture.resourceBytes = 100; missingResourcePath.capture.resourcePath = "";
   assert.throws(() => readWorkerData(missingResourcePath), /索引路径/);
 });
 test('worker transport rejects malformed reply variants before publishing progress or completing an export', () => {

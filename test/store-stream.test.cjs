@@ -15,7 +15,7 @@ async function setup(t) {
   const directory = await fs.mkdtemp(path.join(parent, 'stream-store-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const store = await new SessionStore(path.join(directory, 'sessions')).init();
-  const session = await store.create('流式记录');
+  const session = await store.create('流式记录', '', { id: 'profile-00000000-0000-4000-8000-000000000001', name: '测试环境' }, 'group-00000000-0000-4000-8000-000000000001');
   return { directory, store, session, timeline: path.join(store.getSessionDirectory(session.id), 'timeline.jsonl') };
 }
 

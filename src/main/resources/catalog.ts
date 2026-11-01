@@ -17,6 +17,7 @@ export class ResourceCatalog {
   constructor(private readonly store: SessionStore) {}
   invalidate(id: string): void {
     this.catalogs.delete(id);
+    this.misses.delete(id);
   }
   has(id: string): boolean {
     return this.catalogs.has(id);
@@ -43,6 +44,7 @@ export class ResourceCatalog {
         throw error;
       },
     );
+    this.store.getSession(id);
     const cached = this.catalogs.get(id);
     if (cached?.size === size) return cached.entries;
     if (size > 32 * 1024 * 1024) throw new Error("静态资源索引超过读取上限");
@@ -52,6 +54,9 @@ export class ResourceCatalog {
       .slice(0, -1)
       .filter(Boolean)
       .map((line) => readRecord(JSON.parse(line)));
+    // A deletion can complete while filesystem reads are in flight. Never
+    // repopulate a catalog invalidated by that deletion.
+    this.store.getSession(id);
     if (this.catalogs.size >= 3) {
       const oldest = this.catalogs.keys().next().value;
       if (oldest !== undefined) this.catalogs.delete(oldest);

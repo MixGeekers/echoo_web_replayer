@@ -72,7 +72,7 @@ export function createTimeline(
     const specific = descriptions[type];
     if (specific) return specific;
     if (type.startsWith("page.")) return ["页面事件", "globe", "page"];
-    if (type.startsWith("session.")) return ["会话事件", "record", "session"];
+    if (type.startsWith("session.")) return ["采集事件", "record", "session"];
     if (type.startsWith("action.")) return ["用户操作", "click", "action"];
     return [type || "采集事件", "document", "session"];
   }
@@ -125,7 +125,7 @@ export function createTimeline(
             ? "继续采集后记录页面操作。"
             : "操作页面后，记录会显示在这里。"
           : selectedSessionId
-            ? "此会话没有事件。"
+            ? "此采集记录没有事件。"
             : "点击「开始采集」记录页面操作。";
     empty.append(title, p);
     return empty;
@@ -191,7 +191,7 @@ export function createTimeline(
   }
 
   function timelineRequest(): TimelineQuery {
-    if (!selectedSessionId) throw new Error("尚未选择会话");
+    if (!selectedSessionId) throw new Error("尚未选择采集记录");
     return {
       sessionId: selectedSessionId,
       ...(filter !== "all" ? { types: [filter] } : {}),
@@ -329,7 +329,7 @@ export function createTimeline(
     el("detail-kind", "span").textContent = event.type;
     el("detail-title", "strong").textContent = "事件详情";
     el("detail-meta", "div").textContent =
-      `#${event.seq} · ${formatTime(event.timestamp)} · ${event.url || "本地会话"}`;
+      `#${event.seq} · ${formatTime(event.timestamp)} · ${event.url || "本地记录"}`;
     el("detail-json", "pre").textContent = "正在读取事件…";
     renderTimeline();
     if (replay.active) replay.seek(undefined, event.seq);

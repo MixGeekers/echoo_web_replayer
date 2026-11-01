@@ -25,7 +25,7 @@ interface ExportJob {
 export function createExportJobs(
   win: BrowserWindow,
   store: SessionStore,
-  recording: RecordingController,
+  recording: Pick<RecordingController, "serialize" | "currentSession" | "checkpoint">,
   notify: () => void,
   publish: (progress: ExportProgress) => void,
 ) {
@@ -46,7 +46,7 @@ export function createExportJobs(
   ): Promise<ExportOutcome> {
     const { sessionId, encoding, compression } = input;
     const selected = store.getSession(sessionId);
-    if (!selected) throw new Error("未找到会话");
+    if (selected.libraryState === "trashed") throw new Error("请先从回收站恢复会话");
     const result = await dialog.showSaveDialog(win, {
       title: "导出 Agent 分析包",
       defaultPath: path.join(
@@ -91,14 +91,13 @@ export function createExportJobs(
         }
       },
     });
-    await store.update(sessionId, { lastExportPath: exported.path });
+    await store.update(sessionId, { lastExportPath: exported.path, lastExportAt: new Date().toISOString() });
     notify();
     return { canceled: false, ...exported };
   }
-  function startExport(input: string | ExportRequest): Promise<ExportOutcome> {
+  function startExport(input: ExportRequest): Promise<ExportOutcome> {
     if (activeExport) throw new Error("已有导出任务正在运行");
-    const options =
-      typeof input === "string" ? { sessionId: input } : { ...input };
+    const options = { ...input };
     options.encoding ??= "delta";
     options.compression ??= "deflate";
     if (
@@ -106,7 +105,8 @@ export function createExportJobs(
       !["deflate", "store"].includes(options.compression)
     )
       throw new Error("无效的导出选项");
-    store.getSession(options.sessionId);
+    if (store.getSession(options.sessionId).libraryState === "trashed")
+      throw new Error("请先从回收站恢复会话");
     const job: ExportJob = {
       sessionId: options.sessionId,
       controller: new AbortController(),

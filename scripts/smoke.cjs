@@ -93,6 +93,10 @@ async function run() {
   await step('desktop UI, isolated embedded browser and session start', async () => {
     assert.equal(await guest.evaluate(() => typeof window.collector), 'undefined', 'remote pages must not receive app APIs');
     assert.equal(await guest.evaluate(() => typeof require), 'undefined', 'remote pages must not receive Node');
+    await ui.locator('#new-session-button').click();
+    await ui.locator('#management-name').fill('自动验证 Session');
+    await ui.locator('#management-confirm').click();
+    await ui.locator('#management-dialog').waitFor({ state: 'hidden' });
     await ui.locator('#start-button').click();
     await ui.locator('#session-name-input').fill('自动验证 · 表单与 DOM');
     await ui.locator('#confirm-session-button').click();
@@ -116,7 +120,7 @@ async function run() {
   });
 
   await step('a second process cannot open or rewrite the active recording store', async () => {
-    const timelinePath = path.join(dataDir, 'recordings', sessionId, 'timeline.jsonl');
+    const timelinePath = path.join(dataDir, 'workspace-v3', 'recordings', sessionId, 'timeline.jsonl');
     const before = await fs.readFile(timelinePath);
     const env = { ...process.env, TRACEDOCK_DATA_DIR: dataDir };
     delete env.ELECTRON_RUN_AS_NODE;
@@ -130,7 +134,7 @@ async function run() {
     });
     assert.equal(code, 0, 'second process should exit cleanly');
     assert.equal((await state(ui)).session.status, 'recording');
-    const onDisk = JSON.parse(await fs.readFile(path.join(dataDir, 'recordings', sessionId, 'session.json'), 'utf8'));
+    const onDisk = JSON.parse(await fs.readFile(path.join(dataDir, 'workspace-v3', 'recordings', sessionId, 'session.json'), 'utf8'));
     assert.equal(onDisk.status, 'recording', 'second process must not recover an active session as interrupted');
     const after = await fs.readFile(timelinePath);
     assert.ok(after.subarray(0, before.length).equals(before), 'previously written timeline bytes must be unchanged');
@@ -278,7 +282,7 @@ async function run() {
       child.once('error', reject);
       child.once('exit', code => code === 0 ? resolve() : reject(new Error(`Restore failed (${code}): ${diagnostics}`)));
     });
-    const original = await fs.readFile(path.join(dataDir, 'recordings', sessionId, 'timeline.jsonl'));
+    const original = await fs.readFile(path.join(dataDir, 'workspace-v3', 'recordings', sessionId, 'timeline.jsonl'));
     const restored = await fs.readFile(path.join(restoredPath, 'timeline.jsonl'));
     assert.deepEqual(restored, original, 'bundled script restores the exact persisted UTF-8 bytes');
     const events = restored.toString('utf8').trim().split('\n').map(line => JSON.parse(line));

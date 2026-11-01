@@ -9,16 +9,55 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <aside class="sidebar" aria-label="采集会话">
+  <header class="workspace-header">
     <div class="sidebar-brand">
       <img class="brand-logo" src="../shared/echootek-logo.svg" alt="ECHOOTEK" title="TraceDock · 浏览器采集">
       <button id="help-button" class="icon-button" title="使用说明" aria-label="使用说明" data-icon="help"></button>
     </div>
-    <div class="section-heading">
-      <span>会话</span><span id="session-total" class="count-chip">0</span>
-      <button id="new-session-button" class="icon-button" title="新建采集会话" aria-label="新建采集会话" data-icon="plus"></button>
+    <nav id="profile-tabs" class="profile-tabs" aria-label="Profile 浏览环境"></nav>
+    <div class="profile-header-actions">
+      <span id="active-profile-label" class="profile-connection">环境已关闭</span>
+      <button id="close-profile-button" class="button subtle" type="button">关闭环境</button>
+      <button id="manage-profiles-button" class="button" type="button">管理 Profile</button>
     </div>
-    <div id="session-list" class="session-list" tabindex="-1" aria-label="历史采集会话"></div>
+  </header>
+  <aside class="sidebar" aria-label="Session 与采集记录">
+    <div class="section-heading">
+      <span>Session</span><span id="session-total" class="count-chip">0</span>
+      <button id="new-session-button" class="icon-button" title="新建 Session" aria-label="新建 Session" data-icon="plus"></button>
+    </div>
+    <div class="library-scopes" role="group" aria-label="Session 与采集记录分组">
+      <button id="scope-active" type="button" data-library-scope="active" aria-pressed="true">常用 <span>0</span></button>
+      <button id="scope-archived" type="button" data-library-scope="archived" aria-pressed="false">归档 <span>0</span></button>
+      <button id="scope-trashed" type="button" data-library-scope="trashed" aria-pressed="false">回收站 <span>0</span></button>
+    </div>
+    <div class="library-filters">
+      <label class="library-search"><span data-icon="search" aria-hidden="true"></span><input id="library-search-input" type="search" placeholder="搜索 Session 或记录名称" aria-label="搜索 Session 或采集记录名称" autocomplete="off"></label>
+      <div class="library-filter-options">
+        <select id="library-profile-range" aria-label="检索 Profile 范围"><option value="current">当前 Profile</option><option value="all">全部 Profile</option></select>
+        <button id="library-date-toggle" class="text-button" type="button" aria-expanded="false" aria-controls="library-date-fields">创建时间</button>
+      </div>
+      <div id="library-date-fields" class="library-date-fields" hidden>
+        <label>从<input id="library-date-from" type="date" aria-label="创建时间起始日期"></label>
+        <label>至<input id="library-date-to" type="date" aria-label="创建时间结束日期"></label>
+      </div>
+      <p id="library-date-error" class="library-filter-error" role="alert" hidden></p>
+      <div id="library-filter-status" class="library-filter-status" hidden><span id="library-filter-summary"></span><button id="library-reset-filters" class="text-button" type="button">清除筛选</button></div>
+    </div>
+    <div class="library-list-heading"><p id="library-scope-caption" class="library-scope-caption">Session / 采集记录</p><button id="library-select-button" class="text-button" type="button" aria-pressed="false">多选</button></div>
+    <div id="library-selection-tools" class="library-selection-tools" hidden><label><input id="library-select-all" type="checkbox">全选当前结果</label><button id="library-clear-selection" class="text-button" type="button">清空</button></div>
+    <div id="session-list" class="session-list" tabindex="-1" aria-label="Session 层级列表"></div>
+    <div id="library-batch-bar" class="library-batch-bar" hidden>
+      <strong id="library-batch-summary" aria-live="polite">请选择要整理的内容</strong>
+      <p id="library-batch-hint">选择 Session 将包含全部子记录</p>
+      <div class="library-batch-actions">
+        <button id="library-batch-archive" class="button primary" type="button">归档</button>
+        <button id="library-batch-trash" class="button" type="button">移入回收站</button>
+        <button id="library-batch-restore" class="button primary" type="button" hidden>恢复</button>
+        <button id="library-batch-delete" class="button stop" type="button" hidden>彻底删除</button>
+      </div>
+    </div>
+    <div class="sidebar-footer"><span data-icon="layers"></span><span id="profile-tree-caption">选择一个 Profile</span></div>
   </aside>
 
   <main class="main">
@@ -44,14 +83,14 @@
           <span data-icon="info"></span><span id="browser-error-text"></span>
         </div>
         <div id="browser-surface" class="browser-surface">
-          <div class="browser-placeholder">正在加载页面…</div>
-          <section id="replay-panel" class="replay-panel" aria-label="会话播放器" hidden>
+          <div id="browser-placeholder" class="browser-placeholder">请打开或创建一个 Profile</div>
+          <section id="replay-panel" class="replay-panel" aria-label="采集记录播放器" hidden>
             <div id="replay-stage" class="replay-stage">
               <div id="replay-viewport" class="replay-viewport">
                 <iframe id="replay-frame" src="replay-frame.html" sandbox="allow-same-origin" title="录制的页面画面" tabindex="-1"></iframe>
                 <span id="replay-cursor" class="replay-cursor" hidden>↖</span>
               </div>
-              <div id="replay-message" class="replay-message" role="status">正在读取会话…</div>
+              <div id="replay-message" class="replay-message" role="status">正在读取采集记录…</div>
             </div>
             <div class="replay-controls">
               <div class="replay-position"><span id="replay-time">00:00.0 / 00:00.0</span><span id="replay-event-label">选择事件可跳到对应画面</span></div>
@@ -62,7 +101,7 @@
                 <button id="replay-play" class="button primary" disabled>播放</button>
                 <button id="replay-forward" class="button" aria-label="前进 5 秒">+5s</button>
                 <label class="replay-speed">倍速<select id="replay-speed" aria-label="回放倍速"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option></select></label>
-                <span id="replay-note" class="replay-note">本地会话回放</span>
+                <span id="replay-note" class="replay-note">本地记录回放</span>
               </div>
             </div>
           </section>
@@ -80,12 +119,33 @@
           </div>
         </div>
 
-        <div class="session-overview">
+        <div id="group-context" class="group-context" hidden><span>Session</span><button id="select-parent-group" type="button"></button></div>
+        <div id="group-overview" class="group-overview" hidden>
+          <span class="eyebrow">SESSION</span>
+          <h2 id="current-group-name"></h2>
+          <p id="current-group-meta"></p>
+          <div class="group-management">
+            <button id="rename-group-button" class="button" type="button">重命名</button>
+            <button id="close-group-button" class="button" type="button">关闭 Session</button>
+            <button id="reopen-group-button" class="button" type="button" hidden>重新打开</button>
+            <button id="archive-group-button" class="button" type="button">归档</button>
+            <button id="trash-group-button" class="button stop" type="button">删除</button>
+          </div>
+          <p id="group-management-hint" class="management-hint"></p>
+        </div>
+        <div id="recording-overview" class="session-overview">
           <button id="replay-button" class="button replay-open" disabled><span data-icon="play"></span>回放</button>
           <strong id="current-session-name">未开始采集</strong>
           <span id="current-session-subtitle"></span>
+          <span id="current-session-profile"></span>
+          <div id="session-management" class="session-management" hidden>
+            <button id="rename-session-button" class="button" type="button">重命名</button>
+            <button id="archive-session-button" class="button" type="button">归档</button>
+            <button id="trash-session-button" class="button stop" type="button">删除</button>
+          </div>
+          <span id="session-management-hint"></span>
         </div>
-        <div class="session-metrics" aria-label="会话统计">
+        <div class="session-metrics" aria-label="采集记录统计">
           <div><span>操作</span><strong id="action-count">0</strong></div>
           <div><span>DOM 批次</span><strong id="mutation-count">0</strong></div>
           <div><span>快照</span><strong id="snapshot-count">0</strong></div>
@@ -111,6 +171,19 @@
           <input id="search-input" type="search" placeholder="搜索事件、元素或内容" aria-label="搜索时间线">
           <kbd>/</kbd>
         </label>
+        <div id="session-library-notice" class="session-library-notice" hidden>
+          <span id="library-notice-icon" class="library-notice-icon" data-icon="trash"></span>
+          <strong id="library-notice-title">采集记录在回收站中</strong>
+          <p id="library-notice-description">恢复后可查看时间线、回放和导出。</p>
+          <div class="library-notice-actions">
+            <button id="restore-session-button" class="button primary" type="button" hidden>恢复采集记录</button>
+            <button id="delete-session-button" class="button stop" type="button" hidden>彻底删除</button>
+            <button id="restore-group-button" class="button primary" type="button" hidden>恢复 Session</button>
+            <button id="delete-group-button" class="button stop" type="button" hidden>彻底删除</button>
+            <button id="new-recording-button" class="button" type="button" hidden>新建采集记录</button>
+            <button id="empty-new-session-button" class="button" type="button" hidden>新建 Session</button>
+          </div>
+        </div>
         <div id="timeline-list" class="timeline-list" aria-live="off"></div>
         <button id="load-more-button" class="load-more" hidden>加载更早的事件<span data-icon="chevron-down"></span></button>
         <div id="event-detail" class="event-detail" hidden>
@@ -140,10 +213,41 @@
     <button id="toast-close" class="icon-button" aria-label="关闭提示" data-icon="close"></button>
   </div>
 
+  <dialog id="profiles-dialog" class="dialog profiles-dialog" aria-labelledby="profiles-dialog-title">
+    <div class="help-top"><h2 id="profiles-dialog-title">管理 Profile</h2><button id="close-profiles-dialog" class="icon-button" aria-label="关闭 Profile 管理" data-icon="close"></button></div>
+    <p class="management-description">每个 Profile 独立保存登录状态与缓存，包含自己的 Session 和采集记录。</p>
+    <div class="profile-picker-label"><label for="managed-profile-select">选择 Profile</label><button id="create-profile-button" type="button" class="text-button"><span data-icon="plus"></span>新建 Profile</button></div>
+    <select id="managed-profile-select"></select>
+    <section class="profile-settings-section profile-basic-actions" aria-label="环境操作">
+      <div><strong>浏览环境</strong><p id="managed-profile-status">打开环境后，可在其 Session 中采集。</p></div>
+      <div class="profile-management-actions"><button id="rename-profile-button" class="button" type="button">重命名</button><button id="open-managed-profile" class="button primary" type="button">打开环境</button></div>
+    </section>
+    <section class="profile-settings-section" aria-label="数据清理">
+      <div><strong>数据清理</strong><p>清理浏览数据，保留 Session 和采集记录。</p></div>
+      <div class="profile-management-actions"><button id="clear-profile-cache-button" class="button" type="button">清理缓存</button><button id="clear-profile-storage-button" class="button" type="button">清除登录数据</button></div>
+    </section>
+    <section class="profile-settings-section profile-danger-section" aria-label="删除 Profile">
+      <div><strong>删除 Profile</strong><p>永久清除登录数据，历史 Session 与记录保留。</p></div>
+      <button id="delete-profile-button" class="button stop" type="button">删除 Profile</button>
+    </section>
+    <div class="dialog-actions"><button id="profiles-done-button" class="button" type="button">完成</button></div>
+  </dialog>
+
+  <dialog id="management-dialog" class="dialog" aria-labelledby="management-title">
+    <form id="management-form">
+      <h2 id="management-title"></h2>
+      <p id="management-description" class="management-description"></p>
+      <label id="management-name-label" for="management-name" hidden>名称</label>
+      <input id="management-name" maxlength="100" autocomplete="off" hidden>
+      <div class="dialog-actions"><button id="management-cancel" class="button" type="button">取消</button><button id="management-confirm" class="button primary" type="submit">确认</button></div>
+    </form>
+  </dialog>
+
   <dialog id="session-dialog" class="dialog">
     <form id="session-form">
-      <h2>新建采集会话</h2>
-      <label for="session-name-input">会话名称</label>
+      <h2>新建采集记录</h2>
+      <p id="recording-parent-label" class="management-description"></p>
+      <label for="session-name-input">记录名称</label>
       <input id="session-name-input" maxlength="100" required autocomplete="off">
       <div class="dialog-actions">
         <button type="button" id="cancel-session-button" class="button">取消</button>
@@ -173,9 +277,13 @@
   <dialog id="help-dialog" class="dialog help-dialog">
     <div class="help-top"><h2>使用说明</h2><button id="close-help-button" class="icon-button" aria-label="关闭使用说明" data-icon="close"></button></div>
     <ol class="help-steps">
+      <li>选择或创建 Profile，每个环境独立保留登录状态。切换或关闭环境会先结束当前录制。</li>
       <li>输入网址，或打开演示页。</li>
-      <li>点击「开始采集」，在浏览器中完成操作。可暂停、继续或手动抓取快照。</li>
-      <li>选择会话后点击「回放」，播放、倍速或拖动进度；回放时点击时间线事件可定位画面。已保存的样式、图片和字体从本地加载。</li>
+      <li>在 Profile 下新建 Session，再点击「开始采集」。同一个 Session 可以保存多条独立采集记录。</li>
+      <li>选择采集记录后点击「回放」，播放、倍速或拖动进度；回放时点击时间线事件可定位画面。已保存的样式、图片和字体从本地加载。</li>
+      <li>Session 和采集记录可分别归档或移入回收站；回收站支持恢复与彻底删除。删除 Profile 保留其历史录制。</li>
+      <li>记录库支持按名称和创建时间筛选，也可检索全部 Profile。展开时间条件后，起止日期均包含当天。</li>
+      <li>点击“多选”可批量整理 Session 与记录。选择整个 Session 会包含全部子记录，包括筛选隐藏的内容；确认框会说明范围。切换分组、Profile 或筛选会清空选择。</li>
       <li>导出 ZIP 并交给 Agent。默认差分压缩，包内说明会指导 Agent 用随附脚本还原；也可选择完整导出。</li>
     </ol>
     <p class="help-note">数据保存在本地，按原值采集，不做脱敏。跨域 iframe、封闭 Shadow DOM 和画布内部内容不完整覆盖；具体范围见导出说明。</p>

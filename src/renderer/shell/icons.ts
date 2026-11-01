@@ -1,4 +1,6 @@
 const icons: Record<string, string> = {
+  trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6M14 11v6"/>',
+  archive: '<path d="M4 4h16v5H4zM6 9v12h12V9M10 13h4"/>',
   layers:
     '<path d="m3 7 9-4 9 4-9 4-9-4Z"/><path d="m3 12 9 4 9-4M3 17l9 4 9-4"/>',
   help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 5 .4c0 1.8-2.5 2-2.5 3.6M12 17h.01"/>',

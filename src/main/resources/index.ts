@@ -41,6 +41,7 @@ export class ResourceRecorder {
   catalog(id: string) {
     return this.catalogReader.read(id);
   }
+  get captureError(): string | null { return this.capture.error; }
   summary(id: string, endSeq = Infinity) {
     return this.catalogReader.summary(id, endSeq, this.capture.error);
   }

@@ -17,7 +17,7 @@ async function setup(t) {
   const directory = await fs.mkdtemp(path.join(root, 'replay-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const store = await new SessionStore(path.join(directory, 'recordings')).init();
-  const session = await store.create('Replay test', 'https://site.test/');
+  const session = await store.create('Replay test', 'https://site.test/', { id: 'profile-00000000-0000-4000-8000-000000000001', name: '测试环境' }, 'group-00000000-0000-4000-8000-000000000001');
   return { directory, store, id: session.id };
 }
 
@@ -81,6 +81,35 @@ test('resource serving uses captured versions and never fetches missing resource
   await fs.writeFile(path.join(store.getSessionDirectory(id), 'assets', latest.sha256), 'corrupt');
   assert.equal((await recorder.respond(request(newSeq))).status, 404);
   assert.ok((await recorder.summary(id)).missingURLs.includes('https://site.test/app.css'));
+});
+
+test('a catalog read completing after permanent deletion cannot publish deleted resource entries', async t => {
+  const { store, id, directory } = await setup(t);
+  const recorder = new ResourceRecorder(store, {});
+  const body = Buffer.from('body{color:blue}');
+  const sha256 = createHash('sha256').update(body).digest('hex');
+  const source = path.join(directory, 'race.css');
+  await fs.writeFile(source, body);
+  await store.saveResource(id, { url: 'https://site.test/race.css', mimeType: 'text/css', sha256, bytes: body.length, status: 'saved' }, source);
+  await store.update(id, { status: 'stopped', endedAt: new Date().toISOString() });
+  const filename = path.join(store.getSessionDirectory(id), 'resources.jsonl');
+  const original = fs.readFile;
+  let entered, release;
+  const started = new Promise(resolve => { entered = resolve; });
+  const pending = new Promise(resolve => { release = resolve; });
+  fs.readFile = async function(file, ...args) {
+    const data = await original.call(this, file, ...args);
+    if (file === filename) { entered(); await pending; }
+    return data;
+  };
+  t.after(() => { fs.readFile = original; release(); });
+  const reading = recorder.catalog(id);
+  await started;
+  await store.trash(id);
+  await store.deletePermanently(id);
+  release();
+  await assert.rejects(reading, /找不到/);
+  await assert.rejects(recorder.catalog(id), /找不到/);
 });
 
 for (const encoding of ['delta', 'full']) test(`${encoding} ZIP restores archived resources with hashes and excludes later resources`, async t => {

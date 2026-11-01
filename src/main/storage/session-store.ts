@@ -17,6 +17,7 @@ import type { ResourceEntry } from "../../shared/contracts/resources";
 import { scanTimeline } from "./parser";
 import { errorOf, sessionMetadata } from "./values";
 import { TimelineReader } from "./timeline-reader";
+import { SESSION_GROUP_ID_PATTERN } from "./session-group-store";
 import {
   ID_PATTERN,
   STATUSES,
@@ -37,6 +38,8 @@ export class SessionStore {
   readonly indexes = new Map<string, ReturnType<typeof newIndex>>();
   queue: Promise<unknown> = Promise.resolve();
   private reader = new TimelineReader(this);
+  private readers = new Map<string, number>();
+  private libraryMutations = new Set<string>();
   constructor(rootDir: string) {
     this.rootDir = path.resolve(rootDir);
     this.queue = Promise.resolve();
@@ -210,6 +213,10 @@ export class SessionStore {
     await fs.mkdir(this.rootDir, { recursive: true });
     const entries = await fs.readdir(this.rootDir, { withFileTypes: true });
     for (const entry of entries) {
+      if (entry.isDirectory() && /^\.deleting-session-[a-zA-Z0-9-]+$/.test(entry.name)) {
+        await fs.rm(path.join(this.rootDir, entry.name), { recursive: true, force: true });
+        continue;
+      }
       if (!entry.isDirectory() || !ID_PATTERN.test(entry.name)) continue;
       const directory = this.getSessionDirectory(entry.name);
       let metadata;
@@ -261,16 +268,28 @@ export class SessionStore {
   getSession(id: string) {
     return { ...this._known(id) };
   }
-  create(name: string, url = "") {
+  create(name: string, url: string, profile: { id: string; name: string }, sessionGroupId: string) {
     return this._enqueue(async () => {
+      if (!profile || typeof profile.id !== "string" || !/^profile-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(profile.id) ||
+          typeof profile.name !== "string" || !profile.name.trim())
+        throw new Error("录制必须属于有效的 Profile");
+      if (typeof sessionGroupId !== "string" || !SESSION_GROUP_ID_PATTERN.test(sessionGroupId))
+        throw new Error("录制必须属于有效的 Session");
       const now = new Date().toISOString(),
         id = `session-${now.replace(/[^0-9]/g, "").slice(0, 17)}-${randomUUID().slice(0, 8)}`;
       const metadata: SessionMetadata = {
         id,
+        sessionGroupId,
         name: String(name || `录制 ${now}`)
           .trim()
           .slice(0, 200),
         status: "recording",
+        profileId: profile.id,
+        profileName: profile.name,
+        libraryState: "active",
+        archivedAt: null,
+        trashedAt: null,
+        trashOrigin: null,
         startedAt: now,
         updatedAt: now,
         endedAt: null,
@@ -281,7 +300,7 @@ export class SessionStore {
         snapshotCount: 0,
         lastSeq: 0,
         lastElapsedMs: 0,
-        schemaVersion: 1,
+        schemaVersion: 3,
       };
       const files = this._paths(id);
       await fs.mkdir(files.directory, { recursive: false });
@@ -429,6 +448,120 @@ export class SessionStore {
       return { ...updated };
     });
   }
+  private manageable(id: string) {
+    const value = this._known(id);
+    if (value.status === "recording" || value.status === "paused")
+      throw new Error("请先结束当前录制，再管理记录");
+    return value;
+  }
+  private async saveChange(current: SessionMetadata, changes: Partial<SessionMetadata>) {
+    const updated = { ...current, ...changes, updatedAt: new Date().toISOString() };
+    await this._writeMetadata(updated);
+    this.sessions.set(current.id, updated);
+    return { ...updated };
+  }
+  rename(id: string, name: string) {
+    return this._enqueue(async () => {
+      const current = this.manageable(id);
+      if (current.libraryState === "trashed") throw new Error("请先从回收站恢复记录");
+      if (typeof name !== "string" || !name.trim() || name.trim().length > 160)
+        throw new Error("会话名称需为 1 到 160 个字符");
+      return this.saveChange(current, { name: name.trim() });
+    });
+  }
+  archive(id: string) {
+    return this._enqueue(async () => {
+      const current = this.manageable(id);
+      if (current.libraryState !== "active") throw new Error("只有常用记录可以归档");
+      return this.saveChange(current, { libraryState: "archived", archivedAt: new Date().toISOString() });
+    });
+  }
+  unarchive(id: string) {
+    return this._enqueue(async () => {
+      const current = this.manageable(id);
+      if (current.libraryState !== "archived") throw new Error("此记录未归档");
+      return this.saveChange(current, { libraryState: "active", archivedAt: null });
+    });
+  }
+  trash(id: string) {
+    return this._enqueue(async () => {
+      const current = this.manageable(id);
+      if (current.libraryState === "trashed") throw new Error("此记录已在回收站");
+      return this.saveChange(current, {
+        libraryState: "trashed", trashOrigin: current.libraryState, trashedAt: new Date().toISOString(),
+      });
+    });
+  }
+  restore(id: string) {
+    return this._enqueue(async () => {
+      const current = this.manageable(id);
+      if (current.libraryState !== "trashed" || !current.trashOrigin)
+        throw new Error("此记录不在回收站");
+      return this.saveChange(current, { libraryState: current.trashOrigin, trashOrigin: null, trashedAt: null });
+    });
+  }
+  deletePermanently(id: string): Promise<void> {
+    return this._enqueue(async () => {
+      const current = this.manageable(id);
+      if (current.libraryState !== "trashed") throw new Error("请先将记录移入回收站");
+      await this.deleteFiles(id);
+    });
+  }
+  /** Preflight all children before persisting the parent's deletion intent. */
+  deleteGroupRecordings(sessionGroupId: string, beforeDelete?: () => Promise<void>): Promise<void> {
+    return this._enqueue(async () => {
+      if (!SESSION_GROUP_ID_PATTERN.test(sessionGroupId)) throw new Error("无效 Session ID");
+      const ids = this.list().filter(record => record.sessionGroupId === sessionGroupId).map(record => record.id);
+      for (const id of ids) {
+        this.manageable(id);
+        if (this.readers.get(id)) throw new Error("记录正在读取，请稍后重试");
+      }
+      await beforeDelete?.();
+      for (const id of ids) await this.deleteFiles(id);
+    });
+  }
+  private async deleteFiles(id: string) {
+    if (this.readers.get(id)) throw new Error("记录正在读取，请稍后重试");
+    await this.reader.invalidate(id);
+    const staging = path.join(this.rootDir, `.deleting-${id}-${randomUUID()}`);
+    await fs.rename(this.getSessionDirectory(id), staging);
+    this.sessions.delete(id);
+    this.indexes.delete(id);
+    // The renamed directory is a deletion tombstone, reclaimed on startup if interrupted.
+    await fs.rm(staging, { recursive: true, force: true, maxRetries: 3 });
+  }
+  private async read<T>(id: string, operation: () => Promise<T>): Promise<T> {
+    await this._enqueue(() => {
+      this._known(id);
+      if (this.libraryMutations.has(id)) throw new Error("记录正在批量整理，请稍后重试");
+      this.readers.set(id, (this.readers.get(id) || 0) + 1);
+    });
+    try {
+      return await operation();
+    } finally {
+      const count = (this.readers.get(id) || 1) - 1;
+      if (count) this.readers.set(id, count);
+      else this.readers.delete(id);
+    }
+  }
+  /** Include resource reads in the same lease as timeline reads. Nested reads are safe. */
+  withReadLease<T>(id: string, operation: () => Promise<T>): Promise<T> {
+    return this.read(id, operation);
+  }
+  /** Reserve the complete set before any write, without holding the store queue during writes. */
+  async withLibraryMutation<T>(ids: string[], operation: () => Promise<T>): Promise<T> {
+    const selected = [...new Set(ids)];
+    await this._enqueue(() => {
+      for (const id of selected) {
+        const record = this.manageable(id);
+        if (this.readers.get(id)) throw new Error(`采集记录“${record.name}”正在读取，请稍后重试；未执行任何批量操作`);
+        if (this.libraryMutations.has(id)) throw new Error(`采集记录“${record.name}”正在整理，请稍后重试`);
+      }
+      for (const id of selected) this.libraryMutations.add(id);
+    });
+    try { return await operation(); }
+    finally { await this._enqueue(() => { for (const id of selected) this.libraryMutations.delete(id); }); }
+  }
   flush() {
     return this.queue;
   }
@@ -463,16 +596,16 @@ export class SessionStore {
     });
   }
   timeline(query: TimelineQuery) {
-    return this.reader.timeline(query);
+    return this.read(query.sessionId, () => this.reader.timeline(query));
   }
   getEvent(sessionId: string, eventId: string, options: DetailOptions = {}) {
-    return this.reader.getEvent(sessionId, eventId, options);
+    return this.read(sessionId, () => this.reader.getEvent(sessionId, eventId, options));
   }
   replaySeek(query: ReplayQuery) {
-    return this.reader.replaySeek(query);
+    return this.read(query.sessionId, () => this.reader.replaySeek(query));
   }
   replayChunk(query: ChunkQuery) {
-    return this.reader.replayChunk(query);
+    return this.read(query.sessionId, () => this.reader.replayChunk(query));
   }
 }
 export { summarize, compactEvent } from "./index";

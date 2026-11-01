@@ -36,7 +36,7 @@ async function runRestore(source, output, extra = []) {
 
 async function recording(directory, { metadata = false } = {}) {
   const store = await new SessionStore(path.join(directory, 'sessions')).init();
-  const session = await store.create('Python还原边界');
+  const session = await store.create('Python还原边界', '', { id: 'profile-00000000-0000-4000-8000-000000000001', name: '测试环境' }, 'group-00000000-0000-4000-8000-000000000001');
   const html = '<html>' + '中文😀é\u0000\\"'.repeat(150000) + '\ud800' + '</html>';
   const title = metadata ? '完整标题'.repeat(90000) : '原始标题';
   const snapshot = await store.append(session.id, {

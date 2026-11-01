@@ -171,7 +171,7 @@ async function run() {
     guestAutomation = guest ? 'playwright-page-real-input' : 'snapshot-proof-through-preload-and-ipc';
     console.log(`INFO embedded-browser validation: ${guestAutomation}`);
     if (guest) await guest.locator('#counter-increase').waitFor({ state: 'visible' });
-    assert.ok(await ui.getByRole('complementary', { name: '采集会话' }).isVisible());
+    assert.ok(await ui.locator('.sidebar').isVisible());
     const initial = await state();
     assert.equal(initial.session, null, 'portable app must have its own empty test profile');
     assert.equal(initial.browser.error, null);
@@ -179,6 +179,10 @@ async function run() {
   });
 
   await step('portable UI starts recording and captures the embedded DOM and form baseline', async () => {
+    await ui.locator('#new-session-button').click();
+    await ui.locator('#management-name').fill('便携版验证 Session');
+    await ui.locator('#management-confirm').click();
+    await ui.locator('#management-dialog').waitFor({ state: 'hidden' });
     await ui.locator('#start-button').click();
     await ui.locator('#session-name-input').fill('便携版验证 · 临时目录与采集');
     await ui.locator('#confirm-session-button').click();
@@ -235,7 +239,7 @@ async function run() {
       const value = (await state()).session;
       return value?.status === 'stopped' && value;
     }, 'portable stop');
-    const filename = path.join(dataDir, 'recordings', sessionId, 'timeline.jsonl');
+    const filename = path.join(dataDir, 'workspace-v3', 'recordings', sessionId, 'timeline.jsonl');
     const events = (await fs.readFile(filename, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
     assert.equal(events.length, session.eventCount);
     assert.deepEqual(events.map(event => event.seq), events.map((_event, index) => index + 1));
@@ -248,7 +252,7 @@ async function run() {
   await step('portable ASAR worker exports a default delta ZIP with a functioning bundled restorer', async () => {
     const zipPath = path.join(dataDir, 'portable-delta.zip');
     await configureExportDialog(zipPath);
-    const result = await ui.evaluate(id => window.collector.exportSession(id), sessionId);
+    const result = await ui.evaluate(id => window.collector.exportSession({sessionId:id,encoding:"delta",compression:"deflate"}), sessionId);
     assert.equal(result.canceled, false);
     assert.equal(result.encoding, 'delta');
     assert.equal(result.compression, 'deflate');
@@ -264,7 +268,7 @@ async function run() {
       child.once('error', reject);
       child.once('exit', code => code === 0 ? resolve() : reject(new Error(`Portable restore failed (${code}): ${diagnostics}`)));
     });
-    assert.deepEqual(await fs.readFile(path.join(restored, 'timeline.jsonl')), await fs.readFile(path.join(dataDir, 'recordings', sessionId, 'timeline.jsonl')));
+    assert.deepEqual(await fs.readFile(path.join(restored, 'timeline.jsonl')), await fs.readFile(path.join(dataDir, 'workspace-v3', 'recordings', sessionId, 'timeline.jsonl')));
   });
 
   await step('closing the desktop window exits the portable wrapper normally', async () => {
