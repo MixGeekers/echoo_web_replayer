@@ -100,6 +100,34 @@ input { min-width: 0; }
 .browser-surface { position: relative; flex: 1; min-height: 0; min-width: 0; background: var(--echo-surface-panel); }
 .browser-placeholder { position: absolute; inset: 0; display: grid; place-items: center; color: var(--echo-text-muted); font-size: var(--echo-system-font-sm); }
 
+.replay-open { float: right; margin-left: 8px; color: var(--echo-semantic-brand-text); }
+.replay-toolbar { display: flex; align-items: center; gap: 10px; height: var(--toolbar-height); flex: none; padding: 0 10px; border-bottom: 1px solid var(--line); background: var(--echo-surface-frame); }
+.replay-toolbar > .button { flex: none; }
+.replay-label { font: 600 10px var(--echo-system-font-mono); letter-spacing: 1.5px; color: var(--echo-semantic-brand); }
+#replay-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.replay-resource-status { flex: none; color: var(--echo-semantic-success-text); font-size: 10px; }
+.replay-resource-status.incomplete { color: var(--echo-semantic-warning-text); }
+.replay-panel { position: absolute; inset: 0; display: flex; flex-direction: column; background: #edf1f7; }
+.replay-stage { position: relative; flex: 1; min-height: 0; overflow: hidden; background-image: radial-gradient(#cfd8e5 .65px, transparent .65px); background-size: 12px 12px; }
+.replay-viewport { position: absolute; left: 50%; top: 50%; transform-origin: center; background: white; box-shadow: 0 2px 18px #1c355518; pointer-events: none; }
+#replay-frame { display: block; width: 100%; height: 100%; border: 0; pointer-events: none; }
+.replay-message { position: absolute; inset: 0; display: grid; place-items: center; padding: 28px; text-align: center; color: var(--echo-text-secondary); background: #edf1f7ed; font-size: 13px; }
+.replay-controls { flex: none; padding: 10px 14px 12px; border-top: 1px solid var(--line); background: var(--echo-surface-panel); }
+.replay-position { display: flex; align-items: center; justify-content: space-between; gap: 12px; font: 10px var(--echo-system-font-mono); color: var(--echo-text-muted); }
+#replay-time { flex: none; color: var(--echo-text-secondary); font-variant-numeric: tabular-nums; }
+#replay-event-label { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#replay-progress { display: block; width: 100%; margin: 10px 0; height: 12px; accent-color: var(--echo-semantic-brand); cursor: pointer; }
+.replay-buttons { display: flex; align-items: center; gap: 7px; }
+#replay-play { min-width: 74px; justify-content: center; }
+.replay-speed { display: flex; align-items: center; gap: 6px; color: var(--echo-text-muted); font-size: 11px; }
+.replay-speed select { height: 28px; border: 1px solid var(--line); border-radius: var(--echo-radius-xs); background: var(--echo-surface-panel); color: var(--echo-text-primary); padding: 0 5px; font-size: 11px; }
+.replay-note { margin-left: auto; color: var(--echo-text-muted); font-size: 10px; white-space: nowrap; }
+.replay-cursor { position: absolute; z-index: 2; color: #1d5fe9; font: bold 30px/1 sans-serif; text-shadow: 1px 1px white, -1px -1px white; transform: translate(-5px, -5px); }
+.replay-cursor::before { content: ''; position: absolute; left: -10px; top: -10px; width: 28px; height: 28px; border: 2px solid #1d5fe9; border-radius: 50%; opacity: .35; }
+.replay-cursor.clicked::before { animation: replay-click .65s ease-out; }
+@keyframes replay-click { from { transform: scale(.3); opacity: 1; } to { transform: scale(1.5); opacity: .2; } }
+@media (max-width: 1200px) { .replay-label { display: none; } .replay-toolbar { gap: 6px; } .replay-note { display: none; } }
+
 /* Recording controls and counters live with the timeline. */
 .timeline-card { position: relative; display: flex; flex-direction: column; flex: 0 0 var(--timeline-width); width: var(--timeline-width); min-width: 0; min-height: 0; border-left: 1px solid var(--line); background: var(--echo-surface-panel); }
 .capture-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 5px; height: var(--toolbar-height); flex: none; padding: 0 9px; border-bottom: 1px solid var(--line); }

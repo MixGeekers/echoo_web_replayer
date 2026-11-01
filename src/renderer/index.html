@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'">
-  <title>TraceDock · 浏览器采集</title>
+  <title>TraceDock · 录制与回放</title>
   <link rel="stylesheet" href="../shared/echoo-theme-tokens.css">
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -35,11 +35,37 @@
           </label>
           <button type="button" id="home-button" class="demo-button" title="打开本地演示页面">演示页</button>
         </form>
+        <div id="replay-toolbar" class="replay-toolbar" hidden>
+          <button id="replay-close" class="button"><span data-icon="arrow-left"></span>返回浏览器</button>
+          <span class="replay-label">REPLAY</span><span id="replay-title"></span>
+          <span id="replay-resource-status" class="replay-resource-status">读取资源…</span>
+        </div>
         <div id="browser-error" class="browser-error" hidden>
           <span data-icon="info"></span><span id="browser-error-text"></span>
         </div>
         <div id="browser-surface" class="browser-surface">
           <div class="browser-placeholder">正在加载页面…</div>
+          <section id="replay-panel" class="replay-panel" aria-label="会话播放器" hidden>
+            <div id="replay-stage" class="replay-stage">
+              <div id="replay-viewport" class="replay-viewport">
+                <iframe id="replay-frame" src="replay-frame.html" sandbox="allow-same-origin" title="录制的页面画面" tabindex="-1"></iframe>
+                <span id="replay-cursor" class="replay-cursor" hidden>↖</span>
+              </div>
+              <div id="replay-message" class="replay-message" role="status">正在读取会话…</div>
+            </div>
+            <div class="replay-controls">
+              <div class="replay-position"><span id="replay-time">00:00.0 / 00:00.0</span><span id="replay-event-label">选择事件可跳到对应画面</span></div>
+              <input id="replay-progress" type="range" min="0" max="1" step="1" value="0" aria-label="回放进度" disabled>
+              <div class="replay-buttons">
+                <button id="replay-restart" class="icon-button" aria-label="从头回放" title="从头回放" data-icon="reload"></button>
+                <button id="replay-back" class="button" aria-label="回退 5 秒">−5s</button>
+                <button id="replay-play" class="button primary" disabled>播放</button>
+                <button id="replay-forward" class="button" aria-label="前进 5 秒">+5s</button>
+                <label class="replay-speed">倍速<select id="replay-speed" aria-label="回放倍速"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option></select></label>
+                <span id="replay-note" class="replay-note">本地会话回放</span>
+              </div>
+            </div>
+          </section>
         </div>
       </section>
 
@@ -55,6 +81,7 @@
         </div>
 
         <div class="session-overview">
+          <button id="replay-button" class="button replay-open" disabled><span data-icon="play"></span>回放</button>
           <strong id="current-session-name">未开始采集</strong>
           <span id="current-session-subtitle"></span>
         </div>
@@ -148,11 +175,15 @@
     <ol class="help-steps">
       <li>输入网址，或打开演示页。</li>
       <li>点击「开始采集」，在浏览器中完成操作。可暂停、继续或手动抓取快照。</li>
+      <li>选择会话后点击「回放」，播放、倍速或拖动进度；回放时点击时间线事件可定位画面。已保存的样式、图片和字体从本地加载。</li>
       <li>导出 ZIP 并交给 Agent。默认差分压缩，包内说明会指导 Agent 用随附脚本还原；也可选择完整导出。</li>
     </ol>
     <p class="help-note">数据保存在本地，按原值采集，不做脱敏。跨域 iframe、封闭 Shadow DOM 和画布内部内容不完整覆盖；具体范围见导出说明。</p>
     <button id="help-done-button" class="button primary">知道了</button>
   </dialog>
+  <script src="../shared/replay-urls.js"></script>
+  <script src="replay-dom.js"></script>
+  <script src="replay-player.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

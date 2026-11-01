@@ -1,14 +1,17 @@
-const { app, BrowserWindow, WebContentsView, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, WebContentsView, ipcMain, dialog, shell, protocol } = require('electron');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { randomUUID } = require('node:crypto');
 const { SessionStore } = require('./session-store.cjs');
 const { exportSession } = require('./exporter.cjs');
+const { ResourceRecorder } = require('./resource-recorder.cjs');
+
+protocol.registerSchemesAsPrivileged([{ scheme: 'tracedock-resource', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
 
 app.setName('TraceDock');
 if (process.env.TRACEDOCK_DATA_DIR) app.setPath('userData', path.resolve(process.env.TRACEDOCK_DATA_DIR));
 const demoURL = pathToFileURL(path.join(__dirname, 'demo', 'index.html')).href;
-let win, browser, store, activeId = null, closing = false;
+let win, browser, store, resources, activeId = null, closing = false;
 let commandQueue = Promise.resolve();
 let broadcastTimer;
 let activeExport = null;
@@ -101,6 +104,7 @@ async function startSession(name) {
   const session = await store.create(label, browserState.url);
   activeId = session.id;
   await append('session.start', { name: label, appVersion: app.getVersion(), redaction: false });
+  await resources.start(activeId);
   sendRecorderState();
   await checkpoint('flush', 'start');
   notify();
@@ -109,6 +113,7 @@ async function startSession(name) {
 async function pauseSession() {
   if (currentSession()?.status !== 'recording') throw new Error('当前没有正在录制的会话');
   await checkpoint('stop', 'pause');
+  await resources.stop();
   await append('session.pause', { reason: 'user' });
   await store.update(activeId, { status: 'paused' });
   sendRecorderState(); notify();
@@ -118,6 +123,7 @@ async function resumeSession() {
   if (currentSession()?.status !== 'paused') throw new Error('当前会话未暂停');
   await store.update(activeId, { status: 'recording' });
   await append('session.resume', { reason: 'user', note: '暂停期间未采集；恢复时建立新的 DOM 基线。' });
+  await resources.start(activeId);
   sendRecorderState();
   await checkpoint('flush', 'resume');
   notify(); return currentSession();
@@ -129,6 +135,7 @@ async function stopSession(reason = 'user') {
     await checkpoint('snapshot', 'stop');
     await checkpoint('stop', 'stop');
   }
+  await resources.stop();
   await append('session.stop', { reason });
   await store.update(activeId, { status: 'stopped', endedAt: new Date().toISOString() });
   sendRecorderState();
@@ -223,6 +230,9 @@ function installIPC() {
     getState: () => state(),
     getTimeline: input => store.timeline(input || {}),
     getEvent: input => store.getEvent(input?.sessionId, input?.eventId, { preview: input?.preview, maxBytes: input?.maxBytes }),
+    replaySeek: input => store.replaySeek(input || {}),
+    replayChunk: input => store.replayChunk(input || {}),
+    replayResources: input => resources.summary(input?.sessionId, input?.endSeq),
     navigate, back: () => { if (browser.webContents.navigationHistory.canGoBack()) browser.webContents.navigationHistory.goBack(); },
     forward: () => { if (browser.webContents.navigationHistory.canGoForward()) browser.webContents.navigationHistory.goForward(); },
     reload: () => browser.webContents.reload(), home: () => navigate(demoURL),
@@ -323,10 +333,14 @@ async function createWindow() {
     backgroundThrottling: false,
   } });
   win.contentView.addChildView(browser);
+  installIPC();
+  await browser.webContents.loadURL('about:blank');
+  resources = await new ResourceRecorder(store, browser.webContents, notify).init(app.getPath('userData'));
+  protocol.handle('tracedock-resource', request => resources.respond(request));
   browser.setBounds({ x: 250, y: 190, width: 800, height: 650 });
   browser.setBackgroundColor('#ffffff');
   browser.setVisible(false);
-  installIPC(); browserEvents();
+  browserEvents();
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', event => event.preventDefault());
   win.webContents.on('preload-error', (_event, _path, error) => reportError(error));
@@ -339,6 +353,7 @@ async function createWindow() {
     serialize(() => stopSession('window-close')).catch(reportError).finally(async () => {
       await exporting?.promise.catch(() => {});
       await store.flush().catch(reportError);
+      await resources.close().catch(reportError);
       if (browser && !browser.webContents.isDestroyed()) browser.webContents.close();
       win.destroy();
     });

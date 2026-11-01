@@ -36,7 +36,7 @@ for (const compression of ['store', 'deflate']) {
     const archive = new AdmZip(destination);
     for (let i = 0; i < contents.length; i++) assert.deepEqual(archive.readFile(names[i]), contents[i]);
     const script = 'import zipfile,sys,json,hashlib; z=zipfile.ZipFile(sys.argv[1]); assert z.testzip() is None; print(json.dumps([{\"name\":i.filename,\"method\":i.compress_type,\"bytes\":i.file_size,\"hash\":hashlib.sha256(z.read(i)).hexdigest()} for i in z.infolist()]))';
-    const { stdout } = await run('python', ['-c', script, destination]);
+    const { stdout } = await run(process.env.TRACEDOCK_PYTHON || 'python', ['-c', script, destination]);
     const entries = JSON.parse(stdout);
     for (let i = 0; i < contents.length; i++) {
       assert.equal(entries[i].name, names[i]);
@@ -55,7 +55,7 @@ test('empty ZIP64 archive and disk-spooled large entry count are valid', async t
     await makeArchive({ destination, compression: 'store', entries: (async function* () {
       for (let i = 0; i < count; i++) yield { name: `${i}.txt`, path: source };
     })() });
-    const { stdout } = await run('python', ['-c', 'import zipfile,sys; z=zipfile.ZipFile(sys.argv[1]); assert z.testzip() is None; print(len(z.infolist()))', destination]);
+    const { stdout } = await run(process.env.TRACEDOCK_PYTHON || 'python', ['-c', 'import zipfile,sys; z=zipfile.ZipFile(sys.argv[1]); assert z.testzip() is None; print(len(z.infolist()))', destination]);
     assert.equal(Number(stdout.trim()), count);
   }
 });

@@ -8,6 +8,7 @@
     "start": "electron .",
     "test": "node --test test/*.test.cjs",
     "test:smoke": "node scripts/smoke.cjs",
+    "test:replay": "node scripts/replay-smoke.cjs",
     "test:export-desktop": "node scripts/export-desktop-smoke.cjs",
     "test:large": "node scripts/large-recording.cjs",
     "build": "electron-builder --win portable --x64",

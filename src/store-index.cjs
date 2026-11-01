@@ -8,6 +8,7 @@ const { scanTimeline, compactEventBounded } = require('./store-parser.cjs');
 const ID_PATTERN = /^[a-zA-Z0-9_-]{1,100}$/;
 const STATUSES = new Set(['recording', 'paused', 'stopped', 'interrupted']);
 const ROW_BYTES = 48, IO_BYTES = 65536, MAX_FULL_DETAIL = 8 * 1024 * 1024;
+const MAX_REPLAY_EVENT = 64 * 1024 * 1024;
 const trim = (value, length = 280) => String(value ?? '').slice(0, length);
 
 function summarize(event) {
@@ -213,6 +214,19 @@ class SessionStore {
     });
   }
   append(id, event) { return this._enqueue(() => this._append(id, event)); }
+  saveResource(id, entry, source) {
+    return this._enqueue(async () => {
+      if (this._known(id).status !== 'recording') return;
+      const directory = this.getSessionDirectory(id);
+      if (entry.sha256) {
+        if (!/^[a-f0-9]{64}$/.test(entry.sha256)) throw new Error('无效的资源校验值');
+        await fs.mkdir(path.join(directory, 'assets'), { recursive: true });
+        await fs.copyFile(source, path.join(directory, 'assets', entry.sha256));
+      }
+      const event = await this._append(id, { type: 'page.resource', timestamp: entry.capturedAt, payload: entry });
+      await fs.appendFile(path.join(directory, 'resources.jsonl'), `${JSON.stringify({ ...entry, seq: event.seq, elapsedMs: event.elapsedMs })}\n`);
+    });
+  }
   async _ensureIndex(id) {
     if (!this.indexes.has(id) || this.indexes.get(id).dirty) { const metadata = this._known(id); await this._buildIndex(id, metadata); await this._writeMetadata(metadata); }
     return this.indexes.get(id);
@@ -249,7 +263,9 @@ class SessionStore {
       const index = await this._ensureIndex(sessionId), files = this._paths(sessionId);
       if ((await fs.stat(files.timeline)).size !== index.bytes) { index.dirty = true; await this._ensureIndex(sessionId); }
       const current = this.indexes.get(sessionId);
-      return { metadata: this.getSession(sessionId), timelinePath: files.timeline, byteLength: current.bytes, capturedAt: new Date().toISOString(), indexCount: current.count, indexGeneration: current.generation, categoryCounts: [...current.categories] };
+      const resourcePath = path.join(files.directory, 'resources.jsonl');
+      const resourceBytes = await fs.stat(resourcePath).then(value => value.size, error => { if (error.code === 'ENOENT') return 0; throw error; });
+      return { metadata: this.getSession(sessionId), timelinePath: files.timeline, byteLength: current.bytes, capturedAt: new Date().toISOString(), indexCount: current.count, indexGeneration: current.generation, categoryCounts: [...current.categories], resourcePath, resourceBytes };
     });
   }
   async _typeMatches(row, prefixes, cats, summaries) {
@@ -349,6 +365,60 @@ class SessionStore {
       const decoder = new StringDecoder('utf8'), truncated = length < row.length;
       return { preview: decoder.write(value) + (truncated ? '' : decoder.end()), truncated, bytes: row.length, event };
     } finally { await handle.close(); }
+  }
+  async replaySeek({ sessionId, timeMs, targetSeq, endSeq } = {}) {
+    const capture = await this.capture(sessionId), files = this._paths(sessionId);
+    const handle = await fs.open(files.index, 'r');
+    try {
+      const upperSeq = Number.isSafeInteger(endSeq) ? Math.max(0, Math.min(endSeq, capture.metadata.lastSeq)) : capture.metadata.lastSeq;
+      const count = await sequenceBound(handle, capture.indexCount, upperSeq, true);
+      const rowAt = async index => decodeRow(await readExactly(handle, ROW_BYTES, index * ROW_BYTES), 0, index);
+      const last = count ? await rowAt(count - 1) : null;
+      let targetCount, position;
+      if (Number.isSafeInteger(targetSeq)) {
+        targetCount = await sequenceBound(handle, count, Math.max(0, targetSeq), true);
+        position = targetCount ? (await rowAt(targetCount - 1)).elapsedMs : 0;
+      } else if (timeMs === undefined) {
+        let first;
+        for await (const row of rows(handle, 0, count)) if (row.category === 3) { first = row; break; }
+        if (!first) throw new Error('此会话没有可回放的 DOM 快照');
+        targetCount = first.index + 1; position = first.elapsedMs;
+      } else {
+        position = Math.max(0, Math.min(Number(timeMs) || 0, last?.elapsedMs || 0));
+        let low = 0, high = count;
+        while (low < high) { const mid = low + Math.floor((high - low) / 2); if ((await rowAt(mid)).elapsedMs <= position) low = mid + 1; else high = mid; }
+        targetCount = low;
+      }
+      let baseline = null;
+      for await (const row of rows(handle, 0, targetCount, -1)) if (row.category === 3) { baseline = row; break; }
+      let snapshot = null;
+      if (baseline) {
+        if (baseline.length > MAX_REPLAY_EVENT) throw new Error('此快照超过 64 MB 回放上限；原始数据仍可完整导出');
+        const source = await fs.open(files.timeline, 'r');
+        try { snapshot = JSON.parse((await readExactly(source, baseline.length, baseline.offset)).toString('utf8')); }
+        finally { await source.close(); }
+      }
+      return { session: capture.metadata, snapshot, afterSeq: baseline?.seq || 0, targetSeq: targetCount ? (await rowAt(targetCount - 1)).seq : 0, endSeq: last?.seq || 0, durationMs: last?.elapsedMs || 0, timeMs: position };
+    } finally { await handle.close(); }
+  }
+  async replayChunk({ sessionId, afterSeq = 0, endSeq, limit = 200, maxBytes = 2 * 1024 * 1024 } = {}) {
+    if (!Number.isSafeInteger(afterSeq) || afterSeq < 0 || !Number.isSafeInteger(endSeq) || endSeq < 0) throw new Error('无效的回放范围');
+    const capture = await this.capture(sessionId), files = this._paths(sessionId);
+    const index = await fs.open(files.index, 'r'), source = await fs.open(files.timeline, 'r');
+    try {
+      const end = await sequenceBound(index, capture.indexCount, Math.min(endSeq, capture.metadata.lastSeq), true);
+      const start = await sequenceBound(index, end, afterSeq, true);
+      const size = Math.max(1, Math.min(200, Math.floor(Number(limit) || 200)));
+      const budget = Math.max(1024, Math.min(2 * 1024 * 1024, Number(maxBytes) || 0));
+      const events = []; let bytes = 0, cursor = start;
+      for await (const row of rows(index, start, end)) {
+        if (events.length >= size || (events.length && bytes + row.length > budget)) break;
+        if (row.length > MAX_REPLAY_EVENT) throw new Error(`事件 #${row.seq} 超过 64 MB 回放上限；请导出原始数据`);
+        events.push(JSON.parse((await readExactly(source, row.length, row.offset)).toString('utf8')));
+        bytes += row.length; cursor = row.index + 1;
+      }
+      return { events, afterSeq: events.at(-1)?.seq ?? afterSeq, hasMore: cursor < end };
+    } finally { await index.close(); await source.close(); }
   }
 }
 

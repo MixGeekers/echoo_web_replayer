@@ -167,6 +167,14 @@ const { ipcRenderer } = require('electron');
     const result = { nodeId: nodeId(node), nodeType: node.nodeType, nodeName: node.nodeName };
     if (node.nodeType === 1) {
       result.attributes = attributesFor(node);
+      result.namespaceURI = node.namespaceURI;
+      if (node.localName === 'img' && node.currentSrc) result.currentSrc = node.currentSrc;
+      if (['input', 'textarea', 'select'].includes(node.localName)) {
+        result.state = {};
+        if ('value' in node) result.state.value = node.value;
+        if ('checked' in node) result.state.checked = node.checked;
+        if (node.localName === 'select') result.state.selectedValues = Array.from(node.selectedOptions || [], option => option.value);
+      }
       if (node.localName === 'template' && node.content) result.templateContent = serializeNode(node.content);
       if (node.shadowRoot) result.shadowRoot = serializeNode(node.shadowRoot);
     } else if (node.nodeType === 3 || node.nodeType === 4 || node.nodeType === 8) {
@@ -214,10 +222,11 @@ const { ipcRenderer } = require('electron');
     const win = doc.defaultView;
     const doctype = doctypeFor(doc);
     return {
-      nodeId: nodeId(doc), url: safeUrl(doc), title: doc.title || '', scope: scopeFor(doc),
+      nodeId: nodeId(doc), url: safeUrl(doc), baseUrl: doc.baseURI || safeUrl(doc), title: doc.title || '', scope: scopeFor(doc),
       html: `${doctype}${doctype ? '\n' : ''}${doc.documentElement?.outerHTML || ''}`,
       tree: serializeNode(doc), forms: collectForms(doc),
       scroll: { x: win?.scrollX || 0, y: win?.scrollY || 0 }, viewport: viewportFor(doc),
+      scrolls: Array.from(doc.querySelectorAll('*')).filter(node => node.scrollLeft || node.scrollTop).map(node => ({ nodeId: nodeId(node), x: node.scrollLeft || 0, y: node.scrollTop || 0 })),
     };
   }
 
@@ -368,6 +377,12 @@ const { ipcRenderer } = require('electron');
   }
 
   const actionTypes = ['click', 'dblclick', 'input', 'change', 'keydown', 'submit', 'focusin', 'scroll'];
+  function imageLoaded(event) {
+    if (!recording || seenEvents.has(event) || event.target?.localName !== 'img' || !event.target.currentSrc) return;
+    seenEvents.add(event);
+    flushMutations();
+    send('page.image', { target: { nodeId: nodeId(event.target) }, currentSrc: event.target.currentSrc });
+  }
 
   function isRootAttached(root) {
     if (root === document) return true;
@@ -389,6 +404,7 @@ const { ipcRenderer } = require('electron');
     });
     observer.observe(root, { subtree: true, childList: true, attributes: true, attributeOldValue: true, characterData: true, characterDataOldValue: true });
     for (const type of actionTypes) root.addEventListener(type, actionHandler, { capture: true, passive: type === 'scroll' });
+    root.addEventListener('load', imageLoaded, true);
     observedRoots.set(root, { observer });
     nodeId(root);
     if (root.nodeType === 9 && root !== document && !observedDocuments.has(root)) {
@@ -444,6 +460,7 @@ const { ipcRenderer } = require('electron');
       serializeMutations(observer.takeRecords());
       observer.disconnect();
       for (const type of actionTypes) root.removeEventListener(type, actionHandler, true);
+      root.removeEventListener('load', imageLoaded, true);
       observedRoots.delete(root);
       const onPageHide = observedDocuments.get(root);
       if (onPageHide) root.defaultView?.removeEventListener('pagehide', onPageHide);
@@ -459,6 +476,7 @@ const { ipcRenderer } = require('electron');
     for (const [root, { observer }] of observedRoots) {
       observer.disconnect();
       for (const type of actionTypes) root.removeEventListener(type, actionHandler, true);
+      root.removeEventListener('load', imageLoaded, true);
     }
     for (const [doc, onPageHide] of observedDocuments) doc.defaultView?.removeEventListener('pagehide', onPageHide);
     observedRoots.clear();
@@ -537,6 +555,9 @@ const { ipcRenderer } = require('electron');
 
   window.addEventListener('pageshow', event => {
     if (recording && event.persisted) snapshot('bfcache-restore');
+  });
+  window.addEventListener('resize', () => {
+    if (recording) send('page.resize', { viewport: viewportFor(document) });
   });
 
   const readyVersion = stateVersion;

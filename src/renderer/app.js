@@ -63,6 +63,7 @@
   let boundsFrame;
   let lastBounds = '';
   let exportOptions = { encoding: 'delta', compression: 'deflate' };
+  const replay = new ReplayPlayer(api, () => { renderState(); scheduleBounds(); }, error => notify('回放未完成', error.message, true));
   try {
     const saved = JSON.parse(localStorage.getItem('tracedock.exportOptions') || 'null');
     if (saved && ['delta', 'full'].includes(saved.encoding) && ['deflate', 'store'].includes(saved.compression)) exportOptions = saved;
@@ -99,7 +100,7 @@
     cancelAnimationFrame(boundsFrame);
     boundsFrame = requestAnimationFrame(() => {
       const rect = $('browser-surface').getBoundingClientRect();
-      const bounds = { x:Math.round(rect.x), y:Math.round(rect.y), width:Math.max(0, Math.round(rect.width)), height:Math.max(0, Math.round(rect.height)), visible:!document.querySelector('dialog[open]') && !document.hidden };
+      const bounds = { x:Math.round(rect.x), y:Math.round(rect.y), width:Math.max(0, Math.round(rect.width)), height:Math.max(0, Math.round(rect.height)), visible:!replay.active && !document.querySelector('dialog[open]') && !document.hidden };
       const signature = JSON.stringify(bounds);
       if (signature === lastBounds) return;
       lastBounds = signature;
@@ -120,6 +121,7 @@
 
   function newSession() {
     if (active() || busy) return;
+    if (replay.active) replay.close();
     $('session-name-input').value = `浏览器采集 · ${new Intl.DateTimeFormat('zh-CN', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date())}`;
     showDialog($('session-dialog'));
     $('session-name-input').select();
@@ -187,6 +189,7 @@
     $('pause-button').title = `${paused ? '继续' : '暂停'}：${state.session?.name || '当前会话'}`;
     $('stop-button').title = `结束：${state.session?.name || '当前会话'}`;
     $('export-button').disabled = !session || exporting || busy;
+    $('replay-button').disabled = !session?.snapshotCount || busy;
     $('export-button').title = session ? `导出所选会话：${session.name}` : '先选择一个会话';
     $('snapshot-button').disabled = !recording || busy || historical;
     $('snapshot-button').title = historical ? '请先选中正在录制的会话，再捕获快照' : recording ? `捕获当前页面快照 · ${state.session.name}` : '录制时可捕获当前页面快照';
@@ -204,7 +207,7 @@
     $('back-button').disabled = !browser.canGoBack;
     $('forward-button').disabled = !browser.canGoForward;
     $('reload-button').classList.toggle('loading', Boolean(browser.loading));
-    $('browser-error').hidden = !browser.error;
+    $('browser-error').hidden = replay.active || !browser.error;
     $('browser-error-text').textContent = browser.error?.message || browser.error || '';
     $('page-status').textContent = browser.error ? '页面加载失败，可修改地址后重试' : browser.loading ? '页面加载中…' : '页面已就绪';
     $('page-status-dot').className = browser.error ? 'error' : browser.loading ? 'loading' : '';
@@ -234,6 +237,11 @@
     $('event-detail').hidden = true;
     renderState();
     refreshTimeline(true);
+    if (replay.active) {
+      const session = selectedSession();
+      if (session?.snapshotCount) replay.open(id, session.name);
+      else replay.close();
+    }
   }
 
   function eventPresentation(event) {
@@ -415,6 +423,7 @@
     $('detail-meta').textContent = `#${event.seq} · ${formatTime(event.timestamp)} · ${event.url || '本地会话'}`;
     $('detail-json').textContent = '正在读取事件…';
     renderTimeline();
+    if (replay.active) replay.seek(undefined, event.seq);
     const full = await run(() => api.getEvent({sessionId:selectedSessionId,eventId,preview:true,maxBytes:100000}));
     if (selectedEventId !== eventId) return;
     if (full) {
@@ -425,6 +434,7 @@
   }
 
   $('start-button').addEventListener('click',newSession);
+  $('replay-button').addEventListener('click', () => { const session = selectedSession(); if (session?.snapshotCount) replay.open(session.id, session.name); });
   $('new-session-button').addEventListener('click',newSession);
   $('session-form').addEventListener('submit',async event => {
     event.preventDefault();

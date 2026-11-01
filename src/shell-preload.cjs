@@ -1,5 +1,5 @@
 const { contextBridge, ipcRenderer } = require('electron');
-const methods = ['getState', 'getTimeline', 'getEvent', 'navigate', 'back', 'forward', 'reload', 'home', 'startSession', 'pauseSession', 'resumeSession', 'stopSession', 'snapshot', 'exportSession', 'cancelExport', 'revealExport'];
+const methods = ['getState', 'getTimeline', 'getEvent', 'replaySeek', 'replayChunk', 'replayResources', 'navigate', 'back', 'forward', 'reload', 'home', 'startSession', 'pauseSession', 'resumeSession', 'stopSession', 'snapshot', 'exportSession', 'cancelExport', 'revealExport'];
 const api = Object.fromEntries(methods.map(name => [name, input => ipcRenderer.invoke(`collector:${name}`, input)]));
 api.setBrowserBounds = bounds => ipcRenderer.send('collector:setBrowserBounds', bounds);
 function subscribe(channel, callback) {

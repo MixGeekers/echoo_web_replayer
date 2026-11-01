@@ -698,7 +698,8 @@ def restore(source, destination, timeline_only=False):
         target = work / "result"
         target.mkdir()
         if encoding == "delta":
-            require(package.db.execute("SELECT COUNT(*) FROM entries").fetchone()[0] == 7, "Unexpected delta files")
+            for name, in package.db.execute("SELECT path FROM entries"):
+                require(name in ("manifest.json", "files.jsonl", "session.json", "AGENT_README.md", "restore.py", "index.jsonl", "data.bin", "resources.jsonl") or re.fullmatch(r"assets/[a-f0-9]{64}", name), "Unexpected delta files")
             decode_delta(source_dir, target / "timeline.jsonl", manifest)
         else:
             require(hash_file(source_dir / "timeline.jsonl") == (timeline_size, timeline_hash), "Full timeline fact hash mismatch")
@@ -720,6 +721,12 @@ def restore(source, destination, timeline_only=False):
                         (source_dir / name).replace(output)
                         record_file(target, name, report)
                         derived_files += 1
+            for name, in package.db.execute("SELECT path FROM entries WHERE expected_hash IS NOT NULL ORDER BY path"):
+                if name == "resources.jsonl" or (not timeline_only and re.fullmatch(r"assets/[a-f0-9]{64}", name)):
+                    output = target / name
+                    output.parent.mkdir(parents=True, exist_ok=True)
+                    (source_dir / name).replace(output)
+                    record_file(target, name, report)
             record_file(target, "AGENT_README.md", report)
             record_file(target, "source-manifest.json", report)
         summary = {"status":"ok", "schemaVersion":2, "encoding":encoding, "timelineOnly":timeline_only, "eventCount":counts["events"], "lastSeq":manifest["lastSeq"], "counts":counts, "timeline":facts[0], "facts":facts, "derivedFiles":derived_files, "checksums":"restored-files.jsonl"}

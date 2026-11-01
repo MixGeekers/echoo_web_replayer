@@ -10,9 +10,13 @@
 
 delta 的物理文件为 `data.bin`、`index.jsonl`、`session.json`、`AGENT_README.md`、`restore.py`、`files.jsonl`、`manifest.json`；`derived` 标记 timeline.md/snapshots 在恢复时生成。full 包直接保存 timeline.jsonl、timeline.md、snapshots 和 snapshots.jsonl 索引，另含相同说明、脚本和校验文件。full 与 delta 都使用 V2 manifest；完整数据仍可直接解压阅读。
 
+## 可选静态资源
+
+回放资源扩展：新包可额外包含 `resources.jsonl` 和 `assets/<64 位小写 SHA-256>`。资源索引在 `manifest.files` 中列一次，资源内容只逐项列在 `files.jsonl`，避免根清单随资源数增长。资源行记录 `seq`、`elapsedMs`、`url`、`mimeType`、`status`，保存成功时附 `sha256`/`bytes`，失败时附 `error`。资产先落盘，再与时间线中的 `page.resource` 事件和索引串行提交；导出固定索引字节边界且拒绝超出截点的资源事件。相同内容可由多个 URL/版本引用，资源字节不参与时间线的 COPY/ADD 编码。请使用新包随附的还原脚本；旧版严格限制 delta 文件数量的还原器不支持扩展。`--timeline-only` 恢复资源索引但不复制资产到结果目录。
+
 ## 差分参数和索引
 
-`delta` 对象：`codec:"copy-add-v1"`、`data:"data.bin"`、`index:"index.jsonl"`、`blockBytes:1048576`、`windowBytes:4194304`、`checkpointBlocks:16`、`blocks`。每块原始字节不超过 1 MiB；每 16 块开始独立检查点，窗口只含当前检查点内最多 4 MiB 的已恢复字节。检查点首块必为 raw，任何跨检查点引用都非法。
+`delta` 对象：`codec:"copy-add-v1"`、`data:"data.bin"`、`index:"index.jsonl"`、`blockBytes:1048576`、`windowBytes:4194304`、`checkpointBlocks:16`、`blocks`。每块原始字节不超过 1 MiB；每 16 块开始独立检查点，窗口只含当前检查点内前序字节最多 4 MiB 的已恢复字节。检查点首块必为 raw，任何跨检查点引用都非法。
 
 index.jsonl 每行：
 

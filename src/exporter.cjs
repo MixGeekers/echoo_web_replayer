@@ -90,7 +90,7 @@ Python 3.10+，只使用标准库，无需安装依赖或联网；将 recording.
 
 首版记录浏览器 UI 操作、主文档 DOM 变化、可访问的 DOM 快照及页面状态。可访问 iframe / open Shadow DOM 的具体覆盖应检查每个快照的 coverage 和实际内容。跨域 iframe、closed Shadow DOM、浏览器原生 UI、扩展页面、Canvas/WebGL 像素和跨进程内容无法视为完整 DOM 覆盖。
 
-此包不是网络 HAR、视频、资源离线镜像或浏览器磁盘配置备份；除非文件中明确存在，不能假设记录了响应体、下载内容、Cookie、localStorage 或截图。样式计算、伪元素和 JS 内存状态也无法从 DOM 变化完整重建。连续滚动会节流合并；DOM 变化会批处理。导航和浏览器崩溃可能造成最后尚未送达的事件不可恢复，若发生恢复以 session.interrupted / coverage / 错误事件为依据。
+新录制可包含 resources.jsonl 和 assets/<sha256>，保存实际加载的 CSS、图片和字体响应；完整/差分包均校验并恢复它们。资源索引包含 URL、MIME、SHA-256、字节数、关联 seq 和失败原因。此包不是完整网络 HAR、视频或浏览器配置备份；不能假设包含未列出的资源、API 响应、下载内容、Cookie、localStorage 或截图。CSS 动画、CSSOM 修改和 JS 内存状态也无法从 DOM 变化完整重建。连续滚动会节流合并；DOM 变化会批处理。导航和浏览器崩溃可能造成最后尚未送达的事件不可恢复，若发生恢复以 session.interrupted / coverage / 错误事件为依据。
 
 本次导出以读取到的时间线字节边界为准；导出过程中后来产生的事件不包含在这个包内。原始 JSONL 是事实来源，Markdown 是索引。数据脱敏、自动生成并执行回放、跨站稳定性保证不属于 V1。
 `;
@@ -119,7 +119,7 @@ async function exportSession({ store, sessionId, capture, destination, appVersio
   if (!boundary?.metadata || boundary.metadata.id !== sessionId) throw new Error('导出截点与会话不一致');
   return new Promise((resolve, reject) => {
     const worker = new Worker(path.join(__dirname, 'export-worker.cjs'), { workerData: {
-      capture: { metadata: boundary.metadata, timelinePath: boundary.timelinePath, byteLength: boundary.byteLength, capturedAt: boundary.capturedAt },
+      capture: { metadata: boundary.metadata, timelinePath: boundary.timelinePath, byteLength: boundary.byteLength, capturedAt: boundary.capturedAt, resourcePath: boundary.resourcePath, resourceBytes: boundary.resourceBytes },
       sessionId, destination, appVersion, encoding, compression,
     } });
     let settled = false;
@@ -167,7 +167,7 @@ async function runPreparedExport({ capture, sessionId, destination, appVersion =
       const item = { path: name, bytes: digest.bytes, sha256: digest.sha256 };
       await writeAll(fileIndex, Buffer.from(`${JSON.stringify(item)}\n`));
       fileCount++; physicalBytes += item.bytes;
-      if (!name.startsWith('snapshots/')) entrypoints.push(item);
+      if (!name.startsWith('snapshots/') && !name.startsWith('assets/')) entrypoints.push(item);
       return item;
     };
     const writeText = async (name, value) => {
@@ -178,6 +178,27 @@ async function runPreparedExport({ capture, sessionId, destination, appVersion =
     await writeText('AGENT_README.md', agentReadme(metadata, capture.capturedAt, appVersion, { encoding, compression }));
     await fsp.copyFile(path.join(__dirname, 'restore.py'), path.join(staging, 'restore.py'));
     await recordFile('restore.py');
+    if (capture.resourceBytes) {
+      await pipeline(fs.createReadStream(capture.resourcePath, { start: 0, end: capture.resourceBytes - 1 }), fs.createWriteStream(path.join(staging, 'resources.jsonl'), { flags: 'wx' }), { signal });
+      await recordFile('resources.jsonl');
+      await fsp.mkdir(path.join(staging, 'assets'));
+      const seen = new Set();
+      const lines = readline.createInterface({ input: fs.createReadStream(path.join(staging, 'resources.jsonl')), crlfDelay: Infinity });
+      try {
+        for await (const line of lines) {
+          checkAbort(signal); if (!line) continue;
+          const entry = JSON.parse(line);
+          if (!Number.isSafeInteger(entry.seq) || entry.seq > metadata.lastSeq) throw new Error('资源记录超出导出截点');
+          if (!entry.sha256 || seen.has(entry.sha256)) continue;
+          if (!/^[a-f0-9]{64}$/.test(entry.sha256)) throw new Error('无效的资源路径');
+          seen.add(entry.sha256);
+          const name = `assets/${entry.sha256}`;
+          await fsp.copyFile(path.join(path.dirname(capture.timelinePath), name), path.join(staging, name));
+          const digest = await recordFile(name);
+          if (digest.sha256 !== entry.sha256 || digest.bytes !== entry.bytes) throw new Error('静态资源校验失败');
+        }
+      } finally { lines.close(); }
+    }
     let timeline, eventCount, delta, deltaBlocks;
     if (encoding === 'delta') {
       const result = await encodeTimeline({ timelinePath: capture.timelinePath, byteLength: capture.byteLength,
