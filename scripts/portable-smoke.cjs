@@ -23,6 +23,16 @@ let targets = [], guestAutomation = 'uninitialized';
 let browser, ui, wrapper, sessionId, port;
 let mainPort;
 
+async function captureTargets() {
+  if (!port) return;
+  const response = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(2000) });
+  assert.ok(response.ok, 'CDP target inventory is readable');
+  targets = await response.json();
+  await fs.writeFile(path.join(output, 'portable-targets.json'), JSON.stringify({
+    contexts: browser?.contexts().map(context => context.pages().map(page => page.url())) || [], targets,
+  }, null, 2));
+}
+
 async function configureExportDialog(filePath) {
   // Test-only loopback Node inspector targets the real portable main process.
   // Only the OS save dialog is stubbed; production capture/worker/export run intact.
@@ -134,6 +144,18 @@ async function run() {
       const data = await response.json();
       return data.webSocketDebuggerUrl && data;
     }, 'portable CDP endpoint', 45000);
+    // Plain CDP attach enables the Inspector domain. Electron exposes its
+    // BrowserWindow before it has a renderer, which Playwright can misread as
+    // a crashed target. Wait for the real app pages through the read-only HTTP
+    // inventory before attaching; the app must finish startup by itself.
+    await until(async () => {
+      const response = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(2000) });
+      if (!response.ok) return false;
+      targets = await response.json();
+      return targets.some(target => target.url.includes('/renderer/index.html'))
+        && targets.some(target => target.url.includes('/demo/index.html'));
+    }, 'portable pages finish startup before CDP attach', 45000);
+    await captureTargets();
     browser = await chromium.connectOverCDP(version.webSocketDebuggerUrl, { timeout: 15000 });
     const observe = page => page.on('pageerror', error => uncaughtErrors.push(`${page.url()}: ${error.message}`));
     for (const context of browser.contexts()) { context.pages().forEach(observe); context.on('page', observe); }
@@ -144,10 +166,7 @@ async function run() {
       const initial = await state();
       return !initial.browser.loading && initial.browser.url.includes('/demo/index.html');
     }, 'embedded browser finishes loading');
-    const targetResponse = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(2000) });
-    assert.ok(targetResponse.ok, 'CDP target inventory is readable');
-    targets = await targetResponse.json();
-    await fs.writeFile(path.join(output, 'portable-targets.json'), JSON.stringify({ contexts: browser.contexts().map(context => context.pages().map(page => page.url())), targets }, null, 2));
+    await captureTargets();
     guest = pages().find(page => page.url().includes('/demo/index.html')) || null;
     guestAutomation = guest ? 'playwright-page-real-input' : 'snapshot-proof-through-preload-and-ipc';
     console.log(`INFO embedded-browser validation: ${guestAutomation}`);
@@ -261,6 +280,7 @@ async function run() {
 run().catch(async error => {
   console.error(error.stack || error);
   await fs.mkdir(output, { recursive: true });
+  await captureTargets().catch(diagnostic => logs.push(`Target inventory failed: ${diagnostic.message}\n`));
   await fs.writeFile(path.join(output, 'portable-summary.json'), JSON.stringify({ passed: false, executable, dataDir, port, sessionId, steps, uncaughtErrors, guestAutomation, targets, message: error.message, stack: error.stack }, null, 2));
   process.exitCode = 1;
 }).finally(async () => {
