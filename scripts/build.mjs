@@ -21,6 +21,13 @@ await build({
   outExtension: { ".js": ".cjs" },
   entryPoints: {
     main: "src/main/index.ts",
+    "mcp-stdio": "src/main/mcp/stdio.ts",
+    "mcp-controller": "src/main/mcp/controller.ts",
+    "mcp-tools": "src/main/mcp/tools.ts",
+    "mcp-server": "src/main/mcp/server.ts",
+    "mcp-operations": "src/main/mcp/operations.ts",
+    "mcp-browser": "src/main/mcp/browser.ts",
+    "browser-debugger": "src/main/browser-debugger.ts",
     "shell-preload": "src/preload/shell.ts",
     "browser-preload": "src/preload/browser.ts",
     "session-store": "src/main/storage/session-store.ts",

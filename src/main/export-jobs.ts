@@ -43,11 +43,12 @@ export function createExportJobs(
   async function exportRecording(
     input: ExportRequest,
     job: ExportJob,
+    destination?: string,
   ): Promise<ExportOutcome> {
     const { sessionId, encoding, compression } = input;
     const selected = store.getSession(sessionId);
     if (selected.libraryState === "trashed") throw new Error("请先从回收站恢复会话");
-    const result = await dialog.showSaveDialog(win, {
+    const result = destination ? {canceled: false, filePath: destination} : await dialog.showSaveDialog(win, {
       title: "导出 Agent 分析包",
       defaultPath: path.join(
         app.getPath("downloads"),
@@ -95,7 +96,7 @@ export function createExportJobs(
     notify();
     return { canceled: false, ...exported };
   }
-  function startExport(input: ExportRequest): Promise<ExportOutcome> {
+  function startExport(input: ExportRequest, destination?: string): Promise<ExportOutcome> {
     if (activeExport) throw new Error("已有导出任务正在运行");
     const options = { ...input };
     options.encoding ??= "delta";
@@ -112,14 +113,14 @@ export function createExportJobs(
       controller: new AbortController(),
       promise: Promise.resolve({ canceled: true }),
       progress: {
-        phase: "selecting",
+        phase: destination ? "preparing" : "selecting",
         sessionId: options.sessionId,
         encoding: options.encoding,
         compression: options.compression,
       },
     };
     activeExport = job;
-    job.promise = exportRecording(options, job)
+    job.promise = exportRecording(options, job, destination)
       .then(
         (result) => {
           publishExport(job, { phase: result.canceled ? "canceled" : "done" });
@@ -146,7 +147,12 @@ export function createExportJobs(
 
   return {
     startExport,
+    startExportTo: (input: ExportRequest, destination: string) => {
+      if (!path.isAbsolute(destination)) throw new Error("导出路径必须为绝对路径");
+      return startExport(input, destination);
+    },
     progress: () => (activeExport ? { ...activeExport.progress } : null),
+    waitForIdle: async () => { await activeExport?.promise.catch(() => {}); },
     cancel: () => {
       activeExport?.controller.abort();
       return { canceled: Boolean(activeExport) };

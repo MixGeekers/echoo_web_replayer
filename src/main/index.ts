@@ -3,11 +3,18 @@ import {
   BrowserWindow,
   dialog,
   protocol,
+  shell,
 } from "electron";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { createWorkspace } from "./workspace";
 import { installIPC } from "./ipc";
+import { randomUUID } from "node:crypto";
+import { createMCPController } from "./mcp/controller";
+import { createMCPServer } from "./mcp/server";
+import { createMCPTools } from "./mcp/tools";
+import { createAgentBrowser } from "./mcp/browser";
+import fs from "node:fs/promises";
 protocol.registerSchemesAsPrivileged([
   {
     scheme: "tracedock-resource",
@@ -44,7 +51,22 @@ async function createWindow() {
   window = win;
   win.setMenu(null);
   const workspace = await createWorkspace(win, demoURL);
-  installIPC({win, workspace, demoURL});
+  const instanceId=randomUUID(),mcpRoot=path.join(workspace.root,"mcp");
+  const mcp=await createMCPController(workspace,mcpRoot,instanceId);
+  workspace.setMCPHooks(mcp);
+  const agentBrowser=createAgentBrowser({getWebContents:()=>workspace.requireRuntime().browser.webContents});
+  const mcpTools=await createMCPTools({workspace,access:mcp,browser:agentBrowser,dataRoot:mcpRoot});
+  mcp.setOperations({...mcpTools.operations,revealForUI:async(id:string)=>{
+    const op=mcpTools.operations.getForUI(id),result=op?.result as {path?:string}|undefined;
+    if(op?.kind!=="export"||op.state!=="succeeded"||!result?.path||!result.path.startsWith(mcpTools.exportDirectory+path.sep))throw new Error("没有可打开的导出文件");
+    await fs.access(result.path);shell.showItemInFolder(result.path);
+  }});
+  const mcpServer=await createMCPServer({root:mcpRoot,instanceId,onConnect:mcp.connect,onDisconnect:mcp.disconnected,onCall:mcpTools.call});
+  mcp.setTransportDisconnect(id=>mcpServer.disconnect(id));
+  installIPC({win, workspace, demoURL,mcp,mcpConfig:()=>({
+    command:process.execPath,args:[path.join(__dirname,"mcp-stdio.cjs"),"--discovery",mcpServer.discoveryPath,"--client-id","local-agent"],
+    env:{ELECTRON_RUN_AS_NODE:"1"},instanceId,
+  })});
   protocol.handle("tracedock-resource", request => workspace.respond(request));
   await workspace.init();
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
@@ -57,7 +79,17 @@ async function createWindow() {
     event.preventDefault();
     if (closing) return;
     closing = true;
-    workspace.close().then(() => win.destroy(), error => {
+    (async()=>{
+      if(workspace.jobs.progress()){
+        const answer=await dialog.showMessageBox(win,{type:"question",title:"导出尚未完成",message:"有分析包正在导出",detail:"可以等待导出完成，或取消导出后退出。",buttons:["等待导出后退出","取消导出并退出","返回工作台"],defaultId:0,cancelId:2,noLink:true});
+        if(answer.response===2){closing=false;return false;}
+        if(answer.response===1)workspace.jobs.cancel();
+        await workspace.jobs.waitForIdle();
+      }
+      await mcp.close();await mcpServer.close();agentBrowser.dispose();
+      await workspace.close();await mcpTools.operations.close();
+      return true;
+    })().then(exit => {if(exit)win.destroy();}, error => {
       closing = false;
       workspace.reportError(error);
     });

@@ -15,6 +15,18 @@ import type { AppState, BrowserBounds, BrowserState } from "../shared/contracts/
 import type { LibraryBatchInput } from "../shared/contracts/library";
 import { planLibraryBatch } from "./library-batch";
 import { errorMessage } from "../shared/runtime";
+import type { MCPState } from "../shared/contracts/mcp";
+import { isAgentInputDispatch } from "./mcp/browser";
+
+interface MCPHooks {
+  snapshot(): MCPState;
+  beforeCommand(): void;
+  environmentChanging(target: string | null): void;
+  humanRecordingStarted(id: string): void;
+  humanRecordingResumed(): void;
+  beforeRecordingMutation(): void;
+  controlled(): boolean;
+}
 
 type Runtime = {
   profileId: string;
@@ -55,6 +67,7 @@ export async function createWorkspace(win: BrowserWindow, demoURL: string) {
   let replaySessionId: string | null = null;
   let queue: Promise<unknown> = Promise.resolve();
   let closing = false;
+  let mcp: MCPHooks | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let bounds: BrowserBounds = {x:250,y:190,width:800,height:650,visible:false};
   let browserState: BrowserState = {available:false,url:"",title:"未打开 Profile",loading:false,canGoBack:false,canGoForward:false,error:null};
@@ -69,7 +82,7 @@ export async function createWorkspace(win: BrowserWindow, demoURL: string) {
   }
   function command<T>(operation: () => T | Promise<T>): Promise<T> {
     if (closing) return Promise.reject(new Error("软件正在关闭"));
-    return serialize(operation);
+    return serialize(() => {mcp?.beforeCommand();return operation();});
   }
   function requireRuntime(): Runtime {
     if (!runtime) throw new Error("请先打开一个 Profile");
@@ -91,7 +104,7 @@ export async function createWorkspace(win: BrowserWindow, demoURL: string) {
   function state(): AppState {
     const groups = sessionGroups.list(), ids = new Set(groups.map(group=>group.id));
     const current = runtime?.recording.currentSession() ?? null;
-    return {profiles:profiles.list(),sessionGroups:groups,activeProfileId:runtime?.profileId ?? null,
+    return {...(mcp?{mcp:mcp.snapshot()}:{}),profiles:profiles.list(),sessionGroups:groups,activeProfileId:runtime?.profileId ?? null,
       browser:{...browserState},session:current && ids.has(current.sessionGroupId) ? current : null,
       sessions:store.list().filter(record=>ids.has(record.sessionGroupId)),export:jobs.progress()};
   }
@@ -102,7 +115,8 @@ export async function createWorkspace(win: BrowserWindow, demoURL: string) {
       runtime.browser.setVisible(value.visible);
     }
   }
-  async function closeEnvironment(reason: string) {
+  async function closeEnvironment(reason: string, invalidate = true) {
+    if(invalidate)mcp?.environmentChanging(null);
     const old = runtime;
     if (old) {
       await old.recording.stopSession(reason);
@@ -119,13 +133,19 @@ export async function createWorkspace(win: BrowserWindow, demoURL: string) {
   async function openEnvironment(id: string) {
     profiles.get(id);
     if (runtime?.profileId === id) return;
-    await closeEnvironment("profile-switch");
+    mcp?.environmentChanging(id);
+    await closeEnvironment("profile-switch",false);
     const browser = new WebContentsView({webPreferences:{
       preload:path.join(__dirname,"browser-preload.cjs"), contextIsolation:true,
       nodeIntegration:false,sandbox:true,webSecurity:true,backgroundThrottling:false,
       partition:`persist:tracedock-profile-${id}`,
     }});
     win.contentView.addChildView(browser);
+    const blockHumanInput = (event: Electron.Event) => {
+      if(mcp?.controlled()&&!isAgentInputDispatch(browser.webContents)) event.preventDefault();
+    };
+    browser.webContents.on("before-input-event",blockHumanInput);
+    browser.webContents.on("before-mouse-event",blockHumanInput);
     browser.setBackgroundColor("#ffffff");
     browserState = {available:true,url:demoURL,title:"交互实验室",loading:false,canGoBack:false,canGoForward:false,error:null};
     const resources = new ResourceRecorder(store,browser.webContents,notify);
@@ -261,12 +281,21 @@ export async function createWorkspace(win: BrowserWindow, demoURL: string) {
       await sessionGroups.finishDelete(id);
     })),
     startSession: (input: {sessionGroupId: string; name: string}) => command(async()=>{
+      mcp?.beforeRecordingMutation();
       const group = sessionGroups.get(input.sessionGroupId), current = requireRuntime();
       profiles.get(group.profileId);
       if (group.profileId !== current.profileId) throw new Error("请先打开此 Session 所属的 Profile");
       if (group.status !== "open" || group.libraryState !== "active") throw new Error("请先恢复并打开此 Session，再开始采集");
-      return current.recording.startSession(input);
+      const record=await current.recording.startSession(input);
+      mcp?.humanRecordingStarted(record.id);
+      return record;
     }),
+    pauseSession: () => command(()=>{mcp?.beforeRecordingMutation();return requireRuntime().recording.pauseSession();}),
+    resumeSession: () => command(async()=>{mcp?.beforeRecordingMutation();const result=await requireRuntime().recording.resumeSession();mcp?.humanRecordingResumed();return result;}),
+    stopSession: () => command(()=>{mcp?.beforeRecordingMutation();return requireRuntime().recording.stopSession();}),
+    snapshot: () => command(()=>{mcp?.beforeRecordingMutation();return requireRuntime().recording.snapshot();}),
+    navigate: (url:string) => command(()=>requireRuntime().navigation.navigate(url)),
+    createProfileOnly: (name:string) => command(()=>mutate(()=>profiles.create(name))),
     createProfile: (name: string) => command(()=>mutate(async()=>{const p=await profiles.create(name);await openEnvironment(p.id);})),
     renameProfile: (id:string,name:string) => command(()=>mutate(async()=>{
       await profiles.rename(id,name);
@@ -289,7 +318,8 @@ export async function createWorkspace(win: BrowserWindow, demoURL: string) {
     })),
     setReplaySession: (id:string|null) => command(async()=>{if(id) readable(id);replaySessionId=id;}),
   };
-  return {store,profiles,sessionGroups,jobs,state,notify,reportError,command,requireRuntime,readable,readRecording,actions,setBounds,
+  return {root,store,profiles,sessionGroups,jobs,state,notify,reportError,command,requireRuntime,readable,readRecording,actions,setBounds,
+    setMCPHooks:(hooks:MCPHooks)=>{mcp=hooks;},
     runtime:()=>runtime,
     respond: async (request: {method:string;url:string})=>{
       try {

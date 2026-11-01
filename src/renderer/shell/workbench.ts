@@ -1,6 +1,7 @@
 import { createLifecycleUI } from "./lifecycle";
 import { createTimeline } from "./timeline";
 import { createExportUI } from "./export";
+import { createMCPUI } from "./mcp";
 import { formatDate, count, statusName } from "./format";
 import { element as el, required, message } from "./dom";
 import { svg } from "./icons";
@@ -88,6 +89,12 @@ export function startWorkbench(): void {
     closeDialog,
     notify,
   });
+  const mcp = createMCPUI(api, {
+    state: () => state,
+    update: handleState,
+    boundsChanged: scheduleBounds,
+    notify,
+  });
 
   function notify(
     title: string,
@@ -164,7 +171,7 @@ export function startWorkbench(): void {
   }
 
   async function newSession() {
-    if (active() || busy || !lifecycle.canCapture()) return;
+    if (active() || busy || mcp.controlled() || !lifecycle.canCapture()) return;
     if (replay.active) await replay.close();
     recordingGroupId = lifecycle.selectedGroupId;
     el("recording-parent-label", "p").textContent = `保存到 Session：${lifecycle.selectedGroup()?.name || ""}`;
@@ -390,6 +397,7 @@ export function startWorkbench(): void {
     renderDuration();
     lifecycle.render();
     renderSessions();
+    mcp.render();
     scheduleBounds();
   }
 
@@ -537,6 +545,7 @@ export function startWorkbench(): void {
   document.addEventListener("keydown", (event) => {
     if (
       event.key === "/" &&
+      !mcp.panelOpen &&
       !["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName ?? "") &&
       !document.querySelector("dialog[open]")
     ) {

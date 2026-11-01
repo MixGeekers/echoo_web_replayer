@@ -19,8 +19,16 @@
       <span id="active-profile-label" class="profile-connection">环境已关闭</span>
       <button id="close-profile-button" class="button subtle" type="button">关闭环境</button>
       <button id="manage-profiles-button" class="button" type="button">管理 Profile</button>
+      <button id="mcp-open-button" class="button mcp-entry" type="button" aria-expanded="false" aria-controls="mcp-panel"><span data-icon="plug"></span><span id="mcp-entry-label">Agent 连接</span><i id="mcp-entry-dot" hidden></i></button>
     </div>
   </header>
+  <section id="mcp-collaboration" class="mcp-collaboration" aria-label="人与 Agent 协作状态">
+    <span class="mcp-operator"><span data-icon="user"></span><strong id="mcp-operator-label">你在操作</strong></span>
+    <button id="mcp-status-button" class="mcp-status-button" type="button">本地 MCP 未开启</button>
+    <span id="mcp-capture-label" class="mcp-capture-label"></span>
+    <span id="mcp-target-label" class="mcp-target-label"></span>
+    <button id="mcp-takeover-button" class="button primary" type="button" hidden>立即接管</button>
+  </section>
   <aside class="sidebar" aria-label="Session 与采集记录">
     <div class="section-heading">
       <span>Session</span><span id="session-total" class="count-chip">0</span>
@@ -204,6 +212,43 @@
           <progress id="export-progress-bar" aria-label="导出进度"></progress>
         </div>
       </section>
+      <aside id="mcp-panel" class="mcp-panel" aria-labelledby="mcp-panel-title" hidden>
+        <div class="mcp-panel-heading"><h2 id="mcp-panel-title">Agent 连接</h2><button id="mcp-close-button" class="icon-button" type="button" aria-label="收起 Agent 连接，返回时间线" data-icon="close"></button></div>
+        <div class="mcp-panel-content">
+          <div class="mcp-service-row"><div><strong>本地 MCP</strong><span id="mcp-service-status">未开启</span></div><button id="mcp-service-button" class="button" type="button">开启</button></div>
+          <details id="mcp-setup" class="mcp-setup"><summary>接入配置</summary><p>在支持 MCP 的客户端中添加以下配置，再发起连接。</p><label for="mcp-config">客户端配置</label><textarea id="mcp-config" readonly rows="5" spellcheck="false" aria-label="本地 MCP 客户端配置"></textarea><div class="mcp-setup-actions"><button id="mcp-copy-config" class="button" type="button">复制配置</button><span>仅连接此桌面实例</span></div></details>
+          <section class="mcp-clients-section" aria-label="客户端与授权">
+            <div class="mcp-section-heading"><h3>客户端</h3><span id="mcp-client-count" class="count-chip">0</span></div>
+            <div id="mcp-empty" class="mcp-empty"><span data-icon="plug"></span><strong>等待 Agent 连接</strong><p>开启本地 MCP，复制接入配置。首次连接会在这里请求授权。</p></div>
+            <div id="mcp-client-detail" hidden>
+              <label class="mcp-field" for="mcp-client-select">查看连接<select id="mcp-client-select"></select></label>
+              <div class="mcp-client-status"><i id="mcp-client-dot"></i><strong id="mcp-client-status-label"></strong><span id="mcp-client-id"></span></div>
+              <p id="mcp-connection-note" class="mcp-note"></p>
+              <section id="mcp-control-request" class="mcp-control-request" aria-labelledby="mcp-control-request-title" hidden><h3 id="mcp-control-request-title">请求本次网页控制</h3><p id="mcp-control-request-description"></p><div class="mcp-actions"><button id="mcp-control-deny" class="button" type="button">拒绝</button><button id="mcp-control-approve" class="button primary" type="button">允许本次控制</button></div></section>
+              <details id="mcp-scope-details" class="mcp-scope-details"><summary>访问范围与业务授权</summary><p id="mcp-scope-summary" class="mcp-note"></p>
+              <form id="mcp-grant-form">
+                <fieldset class="mcp-profile-scope"><legend>可访问的 Profile</legend><div id="mcp-profile-list"></div></fieldset>
+                <fieldset class="mcp-permissions"><legend>允许的能力</legend>
+                  <label><input type="checkbox" id="mcp-permission-read" checked disabled><span>读取记录与时间线<small>访问授权环境内的 Session 和采集记录</small></span></label>
+                  <label><input type="checkbox" id="mcp-permission-capture"><span>控制采集<small>开始、暂停、继续、快照与结束</small></span></label>
+                  <label><input type="checkbox" id="mcp-permission-browser"><span>操作网页<small>仍需单独申请本次控制权</small></span></label>
+                  <label><input type="checkbox" id="mcp-permission-organize"><span>整理记录库<small>改名、归档、回收站与恢复</small></span></label>
+                  <label><input type="checkbox" id="mcp-permission-export"><span>导出分析包<small>后台执行，断线后可查询结果</small></span></label>
+                </fieldset>
+                <p id="mcp-grant-error" class="mcp-inline-error" role="alert" hidden></p>
+                <div id="mcp-grant-actions" class="mcp-actions"><button id="mcp-deny-button" class="button" type="button">拒绝连接</button><button id="mcp-grant-button" class="button primary" type="submit">允许连接</button></div>
+              </form>
+              </details>
+              <div class="mcp-control-summary"><span>网页控制权</span><strong id="mcp-control-owner">你</strong><p id="mcp-control-note">连接与业务授权不等于网页控制权。</p></div>
+              <div class="mcp-actions mcp-client-actions"><button id="mcp-disconnect-button" class="button" type="button">断开连接</button><button id="mcp-revoke-button" class="text-button mcp-danger" type="button">撤销授权</button></div>
+            </div>
+          </section>
+          <section id="mcp-delete-section" class="mcp-delete-section" aria-label="待批准的永久删除" hidden><div class="mcp-section-heading"><h3>永久删除申请</h3></div><div id="mcp-delete-list"></div></section>
+          <section id="mcp-operations-section" class="mcp-operations-section" aria-label="后台任务" hidden><div class="mcp-section-heading"><h3>后台任务</h3><span id="mcp-operation-count" class="count-chip"></span></div><div id="mcp-operation-list"></div></section>
+          <section class="mcp-activity-section" aria-label="协作动态"><div class="mcp-section-heading"><h3>协作动态</h3><span id="mcp-activity-count" class="count-chip">0</span></div><ol id="mcp-activity-list" class="mcp-activity-list"></ol><p id="mcp-activity-empty" class="mcp-note">连接、授权和操作结果会显示在这里。</p></section>
+        </div>
+        <div class="mcp-panel-footer"><span data-icon="info"></span><span>多个 Agent 可读取，同一时刻一个操作者。</span></div>
+      </aside>
     </div>
   </main>
 
@@ -285,6 +330,8 @@
       <li>记录库支持按名称和创建时间筛选，也可检索全部 Profile。展开时间条件后，起止日期均包含当天。</li>
       <li>点击“多选”可批量整理 Session 与记录。选择整个 Session 会包含全部子记录，包括筛选隐藏的内容；确认框会说明范围。切换分组、Profile 或筛选会清空选择。</li>
       <li>导出 ZIP 并交给 Agent。默认差分压缩，包内说明会指导 Agent 用随附脚本还原；也可选择完整导出。</li>
+      <li>在“Agent 连接”中开启本地 MCP，复制配置到客户端。授权后，Agent 可在指定 Profile 范围读取记录；操作网页还需单独申请控制权。</li>
+      <li>顶部协作条始终显示操作者。点击“立即接管”后采集继续；Agent 断线只暂停仍由它负责的采集，重连不会自动恢复操作或采集。</li>
     </ol>
     <p class="help-note">数据保存在本地，按原值采集，不做脱敏。跨域 iframe、封闭 Shadow DOM 和画布内部内容不完整覆盖；具体范围见导出说明。</p>
     <button id="help-done-button" class="button primary">知道了</button>

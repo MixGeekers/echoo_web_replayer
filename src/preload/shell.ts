@@ -26,6 +26,8 @@ function subscribe<T>(
   };
 }
 const api: CollectorAPI = {
+  mcpCommand: (input) => invoke("mcpCommand", input),
+  mcpConfig: () => invoke("mcpConfig"),
   getState: () => invoke("getState"),
   batchLibrary: (input) => invoke("batchLibrary", input),
   createSessionGroup: (input) => invoke("createSessionGroup", input),

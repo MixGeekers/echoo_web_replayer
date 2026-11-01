@@ -6,6 +6,12 @@ import type {
   ExportProgress,
   ExportOptions,
 } from "../../shared/contracts/ui";
+const phaseLabels: Record<string, string> = {
+  selecting: "选择保存位置…", preparing: "准备记录…", prepare: "准备记录…",
+  encode: "整理数据", validate: "校验记录", derive: "生成阅读材料",
+  archive: "生成 ZIP", complete: "完成校验…", writing: "写入分析包…",
+};
+export const exportProgressLabel = (phase: string) => phaseLabels[phase] || "正在导出…";
 interface Options {
   sessionId(): string | null;
   selectedSession(): SessionMetadata | null | undefined;
@@ -65,17 +71,7 @@ export function createExportUI(api: CollectorAPI, options: Options) {
     exporting = true;
     exportSessionId = progress.sessionId || exportSessionId;
     el("export-progress", "div").hidden = false;
-    const labels: Record<string, string> = {
-      selecting: "选择保存位置…",
-      preparing: "准备记录…",
-      prepare: "准备记录…",
-      encode: "整理数据",
-      validate: "校验记录",
-      derive: "生成阅读材料",
-      archive: "生成 ZIP",
-      complete: "完成校验…",
-    };
-    const label = labels[progress.phase] || "正在导出…";
+    const label = exportProgressLabel(progress.phase);
     const total = Number(progress.totalBytes || progress.total || 0);
     const completed = Number(progress.bytesRead ?? progress.completed ?? 0);
     const ratio =

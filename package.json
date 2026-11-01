@@ -30,10 +30,16 @@
     "prebuild": "npm run typecheck && npm run compile",
     "prebuild:dir": "npm run typecheck && npm run compile",
     "test:portable": "node scripts/portable-smoke.cjs",
-    "verify": "node scripts/verify.mjs"
+    "verify": "node scripts/verify.mjs",
+    "test:mcp-browser": "node scripts/mcp-browser-smoke.cjs",
+    "pretest:mcp-browser": "npm run compile",
+    "test:mcp": "node scripts/mcp-desktop-smoke.cjs",
+    "pretest:mcp": "npm run compile"
   },
   "dependencies": {
-    "stream-json": "1.9.1"
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "stream-json": "1.9.1",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/adm-zip": "0.5.8",

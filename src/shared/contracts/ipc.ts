@@ -7,6 +7,8 @@ export type {
 } from "./ui";
 import type { CollectorAPI } from "./ui";
 export type InvokeChannel =
+  | "mcpCommand"
+  | "mcpConfig"
   | "getState"
   | "batchLibrary"
   | "createSessionGroup"

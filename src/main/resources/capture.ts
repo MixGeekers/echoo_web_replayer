@@ -5,6 +5,8 @@ import type { WebContents } from "electron";
 import type { SessionStore } from "../storage/session-store";
 import type { ResourceEntry } from "../../shared/contracts/resources";
 import { object, errorMessage, errorCode } from "../../shared/runtime";
+import { acquireBrowserDebugger } from "../browser-debugger";
+import type { BrowserDebuggerLease } from "../browser-debugger";
 
 const RESOURCE_TYPES = new Set(["Stylesheet", "Image", "Font"]);
 const MAX_RESOURCE_BYTES = 16 * 1024 * 1024,
@@ -42,6 +44,7 @@ export class ResourceCapture {
   private cacheBytes = 0;
   private generation = 0;
   private mainFrameId: string | undefined;
+  private debugLease: BrowserDebuggerLease | undefined;
   error: string | null = null;
   constructor(
     private readonly store: SessionStore,
@@ -51,13 +54,11 @@ export class ResourceCapture {
   async init(root: string): Promise<void> {
     this.cache = await fs.mkdtemp(path.join(root, ".resource-cache-"));
     try {
-      const debug = this.host.debugger;
-      if (!debug) throw new Error("浏览器调试接口不可用");
-      debug.attach("1.3");
-      debug.on("message", (_event, method, params: unknown) =>
+      const debug = this.debugLease = acquireBrowserDebugger(this.host);
+      debug.onMessage((method, params: unknown) =>
         this.onMessage(method, params),
       );
-      debug.on("detach", (_event, reason) => {
+      debug.onDetach((reason) => {
         this.error = `静态资源采集已断开：${reason}`;
         this.changed();
       });
@@ -256,7 +257,7 @@ export class ResourceCapture {
           throw new Error("资源超过 16 MB 保存上限");
         if (this.cacheBytes >= MAX_CACHE_BYTES)
           throw new Error("本次运行的静态资源缓存达到 256 MB 上限");
-        const debug = this.host.debugger;
+        const debug = this.debugLease;
         if (!debug || !this.cache) throw new Error("静态资源采集尚未初始化");
         const response = object(
           await debug.sendCommand("Network.getResponseBody", { requestId }),
@@ -344,8 +345,8 @@ export class ResourceCapture {
   }
   async close(): Promise<void> {
     await this.stop();
-    const debug = this.host.debugger;
-    if (debug?.isAttached()) debug.detach();
+    this.debugLease?.release();
+    this.debugLease = undefined;
     if (this.cache) await fs.rm(this.cache, { recursive: true, force: true });
     this.requests.clear();
     this.pending.clear();

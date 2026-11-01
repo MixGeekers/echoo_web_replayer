@@ -6,6 +6,8 @@ const jobs = [
   "test:smoke",
   "test:lifecycle",
   "test:library",
+  "test:mcp-browser",
+  "test:mcp",
   "test:replay",
   "test:resource-navigation",
   "test:export-desktop",

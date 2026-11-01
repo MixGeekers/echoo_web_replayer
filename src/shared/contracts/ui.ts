@@ -16,6 +16,7 @@ import type {
 import type { ExportProgress, ExportResult } from "./export";
 import type { ResourceSummary } from "./resources";
 import type { LibraryBatchInput } from "./library";
+import type { MCPState, MCPCommand, MCPConfig } from "./mcp";
 export type { LibraryBatchAction, LibraryBatchInput } from "./library";
 export type {
   SessionMetadata,
@@ -34,6 +35,7 @@ export interface BrowserState {
   error: string | null;
 }
 export interface AppState {
+  mcp?: MCPState;
   profiles: ProfileMetadata[];
   sessionGroups: SessionGroupMetadata[];
   activeProfileId: string | null;
@@ -63,6 +65,8 @@ export interface ExportOptions {
   compression: "deflate" | "store";
 }
 export interface CollectorAPI {
+  mcpCommand(input: MCPCommand): Promise<AppState>;
+  mcpConfig(): Promise<MCPConfig>;
   getState(): Promise<AppState>;
   batchLibrary(input: LibraryBatchInput): Promise<AppState>;
   createSessionGroup(input: {profileId: string; name: string}): Promise<AppState>;

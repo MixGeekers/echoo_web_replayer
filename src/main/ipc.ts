@@ -11,6 +11,8 @@ import type {
 import type { Workspace } from "./workspace";
 import { object } from "../shared/runtime";
 import { parseLibraryBatch } from "./library-batch";
+import type { MCPController } from "./mcp/controller";
+import type { MCPCommand, MCPConfig } from "../shared/contracts/mcp";
 const string = (value: unknown): string => {
   if (typeof value !== "string") throw new Error("参数必须为字符串");
   return value;
@@ -21,8 +23,8 @@ const number = (value: unknown): number | undefined => {
     throw new Error("参数必须为有限数字");
   return value;
 };
-interface Options {win: BrowserWindow; workspace: Workspace; demoURL: string;}
-export function installIPC({win,workspace,demoURL}: Options) {
+interface Options {win: BrowserWindow; workspace: Workspace; demoURL: string; mcp: MCPController; mcpConfig: ()=>MCPConfig;}
+export function installIPC({win,workspace,demoURL,mcp,mcpConfig}: Options) {
   const {store,state,reportError,jobs,command,readable,readRecording,actions} = workspace;
   const browser = () => workspace.requireRuntime().browser;
   const recording = () => workspace.requireRuntime().recording;
@@ -48,6 +50,8 @@ export function installIPC({win,workspace,demoURL}: Options) {
     });
   }
   handle("getState", state);
+  handle("mcpCommand", input => mcp.command(object(input) as unknown as MCPCommand));
+  handle("mcpConfig", mcpConfig);
   handle("batchLibrary", input => actions.batchLibrary(parseLibraryBatch(input)));
   handle("createSessionGroup", input => {const q=object(input);return actions.createSessionGroup(string(q.profileId),string(q.name));});
   handle("renameSessionGroup", input => {const q=object(input);return actions.renameSessionGroup(string(q.sessionGroupId),string(q.name));});
@@ -128,27 +132,30 @@ export function installIPC({win,workspace,demoURL}: Options) {
     readable(string(q.sessionId));
     return workspace.resourceSummary(string(q.sessionId), number(q.endSeq));
   });
-  handle("navigate", (input) => command(() => navigation().navigate(string(input))));
-  handle("home", () => command(() => navigation().navigate(demoURL)));
+  handle("navigate", (input) => command(() => {mcp.assertHumanControl();return navigation().navigate(string(input));}));
+  handle("home", () => command(() => {mcp.assertHumanControl();return navigation().navigate(demoURL);}));
   handle("back", () => command(() => {
+    mcp.assertHumanControl();
     const h = browser().webContents.navigationHistory;
     if (h.canGoBack()) h.goBack();
   }));
   handle("forward", () => command(() => {
+    mcp.assertHumanControl();
     const h = browser().webContents.navigationHistory;
     if (h.canGoForward()) h.goForward();
   }));
-  handle("reload", () => command(() => browser().webContents.reload()));
+  handle("reload", () => command(() => {mcp.assertHumanControl();browser().webContents.reload();}));
   handle("startSession", input => {
+    mcp.assertHumanControl();
     const q=object(input);
     return actions.startSession({sessionGroupId:string(q.sessionGroupId),name:string(q.name)});
   });
-  handle("pauseSession", () => command(() => recording().pauseSession()));
-  handle("resumeSession", () => command(() => recording().resumeSession()));
+  handle("pauseSession", () => {mcp.assertHumanControl();return actions.pauseSession();});
+  handle("resumeSession", () => {mcp.assertHumanControl();return actions.resumeSession();});
   handle("stopSession", () =>
-    command(() => recording().stopSession()),
+    {mcp.assertHumanControl();return actions.stopSession();},
   );
-  handle("snapshot", () => command(() => recording().snapshot()));
+  handle("snapshot", () => {mcp.assertHumanControl();return actions.snapshot();});
   handle("exportSession", (input) => {
     const q = object(input);
     const encoding = q.encoding ?? "delta",

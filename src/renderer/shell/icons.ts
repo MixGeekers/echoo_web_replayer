@@ -1,4 +1,6 @@
 const icons: Record<string, string> = {
+  plug: '<path d="M8 3v5M16 3v5M6 8h12v4a6 6 0 0 1-12 0V8ZM12 18v4"/>',
+  user: '<circle cx="12" cy="8" r="3"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/>',
   trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6M14 11v6"/>',
   archive: '<path d="M4 4h16v5H4zM6 9v12h12V9M10 13h4"/>',
   layers:
