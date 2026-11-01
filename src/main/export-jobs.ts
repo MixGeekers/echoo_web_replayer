@@ -1,0 +1,160 @@
+import { app, dialog } from "electron";
+import type { BrowserWindow } from "electron";
+import path from "node:path";
+import { exportSession } from "./export/job";
+import type { SessionStore } from "./storage/session-store";
+import type { RecordingController } from "./recording";
+import type {
+  ExportOptions,
+  ExportProgress,
+  ExportResult,
+} from "../shared/contracts/export";
+import { errorMessage, object } from "../shared/runtime";
+export interface ExportRequest extends ExportOptions {
+  sessionId: string;
+}
+export type ExportOutcome =
+  | { canceled: true }
+  | ({ canceled: false } & ExportResult);
+interface ExportJob {
+  sessionId: string;
+  controller: AbortController;
+  progress: ExportProgress;
+  promise: Promise<ExportOutcome>;
+}
+export function createExportJobs(
+  win: BrowserWindow,
+  store: SessionStore,
+  recording: RecordingController,
+  notify: () => void,
+  publish: (progress: ExportProgress) => void,
+) {
+  let activeExport: ExportJob | null = null;
+  const { serialize, currentSession, checkpoint } = recording;
+  function publishExport(job: ExportJob, progress: ExportProgress) {
+    job.progress = { ...job.progress, ...progress, sessionId: job.sessionId };
+    publish(job.progress);
+  }
+  function canceledExport() {
+    const error = new Error("导出已取消");
+    object(error).name = "AbortError";
+    return error;
+  }
+  async function exportRecording(
+    input: ExportRequest,
+    job: ExportJob,
+  ): Promise<ExportOutcome> {
+    const { sessionId, encoding, compression } = input;
+    const selected = store.getSession(sessionId);
+    if (!selected) throw new Error("未找到会话");
+    const result = await dialog.showSaveDialog(win, {
+      title: "导出 Agent 分析包",
+      defaultPath: path.join(
+        app.getPath("downloads"),
+        `TraceDock-${sessionId}.zip`,
+      ),
+      filters: [{ name: "ZIP 分析包", extensions: ["zip"] }],
+    });
+    if (result.canceled || !result.filePath) return { canceled: true as const };
+    if (job.controller.signal.aborted) throw canceledExport();
+    publishExport(job, { phase: "preparing", bytesRead: 0, totalBytes: 0 });
+    // Only the checkpoint and capture share the recording command queue. Encoding
+    // runs in a worker after this immutable boundary so pause/stop remain usable.
+    const capture = await serialize(async () => {
+      if (job.controller.signal.aborted) throw canceledExport();
+      if (
+        sessionId === currentSession()?.id &&
+        currentSession()?.status === "recording"
+      )
+        await checkpoint("snapshot", "export");
+      return store.capture(sessionId);
+    });
+    if (job.controller.signal.aborted) throw canceledExport();
+    let lastProgressAt = 0;
+    const exported = await exportSession({
+      capture,
+      sessionId,
+      destination: result.filePath,
+      appVersion: app.getVersion(),
+      encoding,
+      compression,
+      signal: job.controller.signal,
+      onProgress: (progress) => {
+        const now = Date.now();
+        if (
+          progress.phase !== job.progress.phase ||
+          now - lastProgressAt >= 100 ||
+          progress.bytesRead === progress.totalBytes
+        ) {
+          lastProgressAt = now;
+          publishExport(job, progress);
+        }
+      },
+    });
+    await store.update(sessionId, { lastExportPath: exported.path });
+    notify();
+    return { canceled: false, ...exported };
+  }
+  function startExport(input: string | ExportRequest): Promise<ExportOutcome> {
+    if (activeExport) throw new Error("已有导出任务正在运行");
+    const options =
+      typeof input === "string" ? { sessionId: input } : { ...input };
+    options.encoding ??= "delta";
+    options.compression ??= "deflate";
+    if (
+      !["delta", "full"].includes(options.encoding) ||
+      !["deflate", "store"].includes(options.compression)
+    )
+      throw new Error("无效的导出选项");
+    store.getSession(options.sessionId);
+    const job: ExportJob = {
+      sessionId: options.sessionId,
+      controller: new AbortController(),
+      promise: Promise.resolve({ canceled: true }),
+      progress: {
+        phase: "selecting",
+        sessionId: options.sessionId,
+        encoding: options.encoding,
+        compression: options.compression,
+      },
+    };
+    activeExport = job;
+    job.promise = exportRecording(options, job)
+      .then(
+        (result) => {
+          publishExport(job, { phase: result.canceled ? "canceled" : "done" });
+          return result;
+        },
+        (error) => {
+          if (
+            job.controller.signal.aborted ||
+            object(error).name === "AbortError"
+          ) {
+            publishExport(job, { phase: "canceled" });
+            return { canceled: true as const };
+          }
+          publishExport(job, { phase: "error", message: errorMessage(error) });
+          throw error;
+        },
+      )
+      .finally(() => {
+        if (activeExport === job) activeExport = null;
+        notify();
+      });
+    return job.promise;
+  }
+
+  return {
+    startExport,
+    progress: () => (activeExport ? { ...activeExport.progress } : null),
+    cancel: () => {
+      activeExport?.controller.abort();
+      return { canceled: Boolean(activeExport) };
+    },
+    close: async () => {
+      const job = activeExport;
+      job?.controller.abort();
+      await job?.promise.catch(() => {});
+    },
+  };
+}

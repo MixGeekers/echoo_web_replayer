@@ -1,0 +1,54 @@
+name: Windows verification
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env:
+      PYTHON: python
+      TRACEDOCK_PYTHON: python
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Verify types, recording, replay, resources, export, and large recordings
+        run: npm run verify
+      - name: Build Windows portable application
+        run: npm run build
+      - name: Verify native portable application
+        run: npm run test:portable
+      - name: Upload verification reports
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: windows-verification-reports
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            output/playwright/*.json
+            output/playwright/*.png
+            output/playwright/*.log
+            output/replay-smoke-*/report.json
+            output/replay-smoke-*/offline-replay.png
+            output/resource-navigation-smoke-*/report.json
+            output/export-desktop-*/summary.json
+            output/large-recording-*/report-*.json
+      - name: Upload verified portable application
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: TraceDock-Windows-x64
+          retention-days: 7
+          if-no-files-found: error
+          path: dist/TraceDock-*-Windows-x64.exe

@@ -6,8 +6,8 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
 const AdmZip = require('adm-zip');
-const { SessionStore } = require('../src/session-store.cjs');
-const { exportSession } = require('../src/exporter.cjs');
+const { SessionStore } = require('../out/session-store.cjs');
+const { exportSession } = require('../out/exporter.cjs');
 
 async function setup(t) {
   // Keep test artifacts in the workspace; the Windows app sandbox can prohibit

@@ -7,7 +7,7 @@ const { promisify } = require('node:util');
 const { execFile } = require('node:child_process');
 const { createHash } = require('node:crypto');
 const AdmZip = require('adm-zip');
-const { makeArchive, crc32 } = require('../src/delta-zip.cjs');
+const { makeArchive, crc32 } = require('../out/delta-zip.cjs');
 const run = promisify(execFile);
 
 async function workspace(t) {

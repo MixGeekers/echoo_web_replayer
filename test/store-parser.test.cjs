@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { scanTimeline, compactEventBounded } = require('../src/store-parser.cjs');
+const { scanTimeline, compactEventBounded } = require('../out/store-parser.cjs');
 
 async function fixture(t) {
   const root = path.join(__dirname, '..', 'output', 'test-temp');

@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { randomBytes, createHash } = require('node:crypto');
-const { makePatch, applyPatch, encodeTimeline, BLOCK_BYTES, WINDOW_BYTES, CHECKPOINT_BLOCKS } = require('../src/delta-codec.cjs');
+const { makePatch, applyPatch, encodeTimeline, BLOCK_BYTES, WINDOW_BYTES, CHECKPOINT_BLOCKS } = require('../out/delta-codec.cjs');
 
 test('COPY/ADD preserves arbitrary bytes and shifted multiple edits, rejects malformed instructions', () => {
   const base = Buffer.concat([randomBytes(4096), Buffer.from('中文🙂\0\r\n'.repeat(1000)), randomBytes(2048)]);

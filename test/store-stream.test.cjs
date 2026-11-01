@@ -6,7 +6,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
-const { SessionStore } = require('../src/session-store.cjs');
+const { SessionStore } = require('../out/session-store.cjs');
 const execute = promisify(execFile);
 
 async function setup(t) {
@@ -108,7 +108,7 @@ test('64 MiB single event is indexed, searched and previewed under a 48 MiB JS h
   const script = path.join(directory, 'bounded-memory.cjs');
   await fs.writeFile(script, `
 const assert = require('node:assert/strict');
-const { SessionStore } = require(${JSON.stringify(path.resolve(__dirname, '../src/session-store.cjs'))});
+const { SessionStore } = require(${JSON.stringify(path.resolve(__dirname, '../out/session-store.cjs'))});
 (async () => {
   const store = await new SessionStore(${JSON.stringify(store.rootDir)}).init();
   const id = ${JSON.stringify(session.id)};

@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": [],
+    "composite": true,
+    "tsBuildInfoFile": "./out/cache/renderer.tsbuildinfo"
+  },
+  "include": [
+    "src/renderer/**/*.ts",
+    "src/replay/**/*.ts",
+    "src/demo/**/*.ts",
+    "src/shared/**/*.ts"
+  ]
+}

@@ -160,7 +160,7 @@ async function generate(directory, config) {
 }
 
 async function indexFixture(directory) {
-  const { SessionStore } = require('../src/session-store.cjs');
+  const { SessionStore } = require('../out/session-store.cjs');
   const fixture = JSON.parse(await fsp.readFile(path.join(directory, 'fixture.json'), 'utf8'));
   const store = await new SessionStore(fixture.sessionsRoot).init();
   assert.equal(store.getSession(sessionId).eventCount, fixture.metadata.eventCount);
@@ -180,7 +180,7 @@ async function indexFixture(directory) {
 }
 
 async function exportFixture(directory, config) {
-  const { exportSession } = require('../src/exporter.cjs');
+  const { exportSession } = require('../out/exporter.cjs');
   const fixture = JSON.parse(await fsp.readFile(path.join(directory, 'fixture.json'), 'utf8'));
   const metadata = JSON.parse(await fsp.readFile(path.join(fixture.sessionsRoot, sessionId, 'session.json'), 'utf8'));
   const capture = { metadata, timelinePath: fixture.timelinePath, byteLength: fixture.timeline.bytes, capturedAt: new Date().toISOString() };

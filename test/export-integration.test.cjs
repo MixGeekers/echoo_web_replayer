@@ -8,8 +8,8 @@ const { createHash } = require('node:crypto');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const AdmZip = require('adm-zip');
-const { SessionStore } = require('../src/session-store.cjs');
-const { exportSession } = require('../src/exporter.cjs');
+const { SessionStore } = require('../out/session-store.cjs');
+const { exportSession } = require('../out/exporter.cjs');
 
 const run = promisify(execFile);
 const python = process.env.TRACEDOCK_PYTHON || 'python';

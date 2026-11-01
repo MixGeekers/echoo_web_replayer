@@ -7,10 +7,10 @@ const path = require('node:path');
 const { createHash } = require('node:crypto');
 const { promisify } = require('node:util');
 const { execFile } = require('node:child_process');
-const { SessionStore } = require('../src/session-store.cjs');
-const { ResourceRecorder } = require('../src/resource-recorder.cjs');
-const { resourceURL, cssText } = require('../src/shared/replay-urls.js');
-const { exportSession } = require('../src/exporter.cjs');
+const { SessionStore } = require('../out/session-store.cjs');
+const { ResourceRecorder } = require('../out/resource-recorder.cjs');
+const { resourceURL, cssText } = require('../out/shared/replay-urls.js');
+const { exportSession } = require('../out/exporter.cjs');
 
 async function setup(t) {
   const root = path.join(__dirname, '../output/test-temp'); await fs.mkdir(root, { recursive: true });
@@ -93,7 +93,7 @@ for (const encoding of ['delta', 'full']) test(`${encoding} ZIP restores archive
   const zip = path.join(directory, `${encoding}.zip`);
   await exportSession({ store, sessionId: id, capture, destination: zip, encoding });
   const output = path.join(directory, 'restored');
-  await promisify(execFile)(process.env.TRACEDOCK_PYTHON || 'python', [path.join(__dirname, '../src/restore.py'), zip, '--output', output]);
+  await promisify(execFile)(process.env.TRACEDOCK_PYTHON || 'python', [path.join(__dirname, '../out/restore.py'), zip, '--output', output]);
   assert.deepEqual(await fs.readFile(path.join(output, 'assets', sha256)), body);
   const manifest = await fs.readFile(path.join(output, 'resources.jsonl'), 'utf8');
   assert.ok(manifest.includes('style.css')); assert.ok(!manifest.includes('later.css'));

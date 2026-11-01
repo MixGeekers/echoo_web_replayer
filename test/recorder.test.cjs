@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'browser-preload.cjs'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, '..', 'out', 'browser-preload.cjs'), 'utf8');
 
 // A small host fixture exercises preload IPC lifecycle and lossless buffering.
 // Actual browser event propagation is covered by the Electron smoke test.
@@ -225,4 +225,35 @@ test('failed snapshots report failure in command acknowledgement without throwin
   assert.doesNotThrow(() => host.doc.dispatch('DOMContentLoaded'));
   assert.equal(host.events('recorder.error').length, 2);
   assert.equal(host.events('dom.snapshot').length, before);
+});
+
+test('pause and resume retain document node identity without duplicate action listeners', async () => {
+  const host = fixture();
+  await host.ready({ recording: true, sessionId: 'resume-identity' });
+  const before = host.events('dom.snapshot').at(-1);
+  host.command('stop');
+  host.state({ recording: false, sessionId: 'resume-identity' });
+  host.doc.dispatch('input', { target: host.input, isTrusted: true });
+  assert.equal(host.events('action.input').length, 0);
+  host.state({ recording: true, sessionId: 'resume-identity' });
+  host.input.value = 'after resume';
+  host.doc.dispatch('input', { target: host.input, isTrusted: true });
+  const actions = host.events('action.input');
+  assert.equal(actions.length, 1);
+  assert.equal(actions[0].documentId, before.documentId);
+  assert.equal(actions[0].payload.form.nodeId, before.payload.forms[0].nodeId);
+  assert.equal(actions[0].payload.form.value, 'after resume');
+});
+
+test('unsupported recorder commands acknowledge failure and leave recording usable', async () => {
+  const host = fixture();
+  await host.ready({ recording: true, sessionId: 'command-validation' });
+  host.command('unsupported', 'invalid-command');
+  const ack = host.sent.find(item => item.channel === 'recorder:ack' && item.data.requestId === 'invalid-command');
+  assert.equal(ack.data.ok, false);
+  assert.match(ack.data.error, /Unsupported recorder command/);
+  const before = host.events('dom.snapshot').length;
+  host.command('snapshot', 'next-command');
+  assert.equal(host.events('dom.snapshot').length, before + 1);
+  assert.equal(host.sent.find(item => item.channel === 'recorder:ack' && item.data.requestId === 'next-command').data.ok, true);
 });

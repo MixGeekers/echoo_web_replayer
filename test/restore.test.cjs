@@ -8,12 +8,12 @@ const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const { createHash } = require('node:crypto');
 const AdmZip = require('adm-zip');
-const { SessionStore } = require('../src/session-store.cjs');
-const { exportSession } = require('../src/exporter.cjs');
+const { SessionStore } = require('../out/session-store.cjs');
+const { exportSession } = require('../out/exporter.cjs');
 
 const exec = promisify(execFile);
 const python = process.env.TRACEDOCK_PYTHON || 'python';
-const script = path.resolve(__dirname, '../src/restore.py');
+const script = path.resolve(__dirname, '../out/restore.py');
 const sha = value => createHash('sha256').update(value).digest('hex');
 const json = value => Buffer.from(JSON.stringify(value) + '\n');
 

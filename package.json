@@ -3,25 +3,44 @@
   "version": "0.2.0",
   "private": true,
   "description": "TraceDock 浏览器操作与 DOM 时间线采集工作台",
-  "main": "src/main.cjs",
+  "main": "out/main.cjs",
   "scripts": {
     "start": "electron .",
     "test": "node --test test/*.test.cjs",
     "test:smoke": "node scripts/smoke.cjs",
     "test:replay": "node scripts/replay-smoke.cjs",
+    "test:resource-navigation": "node scripts/resource-navigation-smoke.cjs",
     "test:export-desktop": "node scripts/export-desktop-smoke.cjs",
     "test:large": "node scripts/large-recording.cjs",
     "build": "electron-builder --win portable --x64",
-    "build:dir": "electron-builder --win --dir --x64"
+    "build:dir": "electron-builder --win --dir --x64",
+    "typecheck": "tsc -p tsconfig.main.json && tsc -p tsconfig.preload.json && tsc -p tsconfig.renderer.json && tsc -p tsconfig.contracts.json",
+    "compile": "node scripts/build.mjs",
+    "prestart": "npm run compile",
+    "pretest": "npm run compile",
+    "pretest:smoke": "npm run compile",
+    "pretest:replay": "npm run compile",
+    "pretest:resource-navigation": "npm run compile",
+    "pretest:export-desktop": "npm run compile",
+    "pretest:large": "npm run compile",
+    "prebuild": "npm run typecheck && npm run compile",
+    "prebuild:dir": "npm run typecheck && npm run compile",
+    "test:portable": "node scripts/portable-smoke.cjs",
+    "verify": "node scripts/verify.mjs"
   },
   "dependencies": {
     "stream-json": "1.9.1"
   },
   "devDependencies": {
+    "@types/adm-zip": "0.5.8",
+    "@types/node": "24.19.2",
+    "@types/stream-json": "1.7.8",
     "adm-zip": "^0.5.16",
     "electron": "45.1.0",
     "electron-builder": "26.18.0",
-    "playwright-core": "1.64.1"
+    "esbuild": "0.28.2",
+    "playwright-core": "1.64.1",
+    "typescript": "7.0.2"
   },
   "build": {
     "appId": "com.tracedock.desktop",
@@ -30,7 +49,8 @@
       "output": "dist"
     },
     "files": [
-      "src/**/*",
+      "out/**/*",
+      "!out/cache/**",
       "package.json"
     ],
     "asar": true,

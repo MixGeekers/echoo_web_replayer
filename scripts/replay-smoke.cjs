@@ -37,11 +37,19 @@ async function run() {
   const origin = `http://127.0.0.1:${server.address().port}`;
   try {
     const env = { ...process.env, TRACEDOCK_DATA_DIR: path.join(output, 'data') }; delete env.ELECTRON_RUN_AS_NODE;
-    desktop = await _electron.launch({ executablePath: require('electron'), args: [root], cwd: root, env });
+    desktop = await _electron.launch({ executablePath: process.env.TRACEDOCK_EXECUTABLE || require('electron'), args: process.env.TRACEDOCK_EXECUTABLE ? [] : [root], cwd: root, env });
     const ui = desktop.context().pages().find(page => page.url().includes('/renderer/')) || await desktop.waitForEvent('window', { predicate: page => page.url().includes('/renderer/') });
     assert.ok(ui, 'desktop shell exists');
     await ui.waitForLoadState('domcontentloaded');
+    // The main process opens the demo after the shell loads. Let that startup
+    // navigation finish before the test asks it to open the fixture website.
+    await ui.waitForFunction(async () => {
+      if (!window.collector) return false;
+      const state = await window.collector.getState();
+      return !state.browser.loading && state.browser.url.includes('/demo/index.html');
+    });
     const guest = desktop.context().pages().find(page => page !== ui);
+    assert.ok(guest, 'browser guest exists');
     const errors = []; ui.on('pageerror', error => errors.push(error.message));
     await ui.locator('#address-input').fill(origin); await ui.locator('#address-form').press('Enter');
     await guest.waitForURL(`${origin}/`);
@@ -59,7 +67,7 @@ async function run() {
     const state = await ui.evaluate(() => window.collector.getState());
     const events = (await ui.evaluate(sessionId => window.collector.getTimeline({ sessionId, limit: 200 }), state.session.id)).events;
     const resourceStatus = await ui.evaluate(sessionId => window.collector.replayResources({ sessionId }), state.session.id);
-    assert.equal(resourceStatus.saved, font ? 5 : 4); assert.ok(resourceStatus.missing >= 1);
+    assert.equal(resourceStatus.saved, font ? 5 : 4); assert.equal(resourceStatus.missing, 1); assert.deepEqual(resourceStatus.missingURLs, [`${origin}/missing.png`]);
     server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); const beforeReplay = requestCount;
     await ui.locator('#replay-button').click();
     await ui.waitForFunction(() => !document.querySelector('#replay-play').disabled && document.querySelector('#replay-frame').contentDocument.querySelector('#logo')?.naturalWidth === 60);

@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
-const { deriveFiles } = require('../src/export-derived.cjs');
+const { deriveFiles } = require('../out/export-derived.cjs');
 
 async function setup(t, contents) {
   const parent = path.resolve(__dirname, '../output/test-temp');

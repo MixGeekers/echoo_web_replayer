@@ -6,7 +6,7 @@
 
 ## 运行与打包
 
-开发环境需要 Node.js 22.12 或更高版本与 npm。在项目目录运行：
+开发环境需要 Node.js 22.12 或更高版本与 npm。业务源码使用 TypeScript 7.0.2；`npm start` 和测试命令会先通过 esbuild 构建到 `out/`。在项目目录运行：
 
 ```powershell
 npm install
@@ -16,9 +16,11 @@ npm start
 检查和构建命令：
 
 ```powershell
-npm test                 # 存储、导出及采集器回归检查
+npm run typecheck        # TS7 严格类型及契约检查
+npm test                 # 构建后运行存储、导出、采集器及回放核心回归
 npm run test:smoke       # 启动真实 Electron 应用进行流程验证
 npm run test:replay      # 录制后关闭原网站，验证静态资源、DOM 与播放器
+npm run test:resource-navigation # 跨页面和会话切换的资源归属回归
 npm run build:dir        # 生成 Windows 可运行目录
 npm run build            # 生成 Windows x64 便携版 EXE
 node scripts/portable-smoke.cjs # 构建后验证单文件启动、录制与重复启动
@@ -138,26 +140,40 @@ npm start
 ## 代码结构
 
 ```text
-src/main.cjs              Electron 主进程、WebContentsView、会话控制和 IPC
-src/shell-preload.cjs     工作台可调用的有限桥接接口
-src/browser-preload.cjs   隔离环境中的操作 / DOM 采集器
-src/session-store.cjs     串行持久化、时间线查询和中断恢复
-src/resource-recorder.cjs 静态响应归档、本地资源协议与缺失统计
-src/shared/replay-urls.js HTML/CSS 资源引用改写
-src/exporter.cjs          一致截点 ZIP、快照、Markdown 与校验清单
-src/export-worker.cjs     后台导出、进度和取消
-src/delta-codec.cjs       有界字节块 COPY/ADD 编码
-src/delta-zip.cjs         中央目录落盘的流式 ZIP64 写入
-src/export-derived.cjs    巨型事件的流式快照与 Markdown 派生
-src/restore.py            随包 Python 离线还原与校验
-src/renderer/            工作台 UI
-src/renderer/replay-*    隔离页面重建、时间调度与播放器
-src/demo/                无需网络的交互演示页
-test/                    回归检查
-scripts/smoke.cjs         真实应用流程验证
-scripts/portable-smoke.cjs 单文件便携版原生启动与重复启动验证
+src/main/index.ts          Electron 启动与依赖组装
+src/main/recording.ts      录制状态、串行命令、采集确认
+src/main/browser.ts        导航和浏览器生命周期
+src/main/ipc.ts            IPC 参数校验与类型化方法注册
+src/main/export-jobs.ts    导出对话框、截点及任务管理
+src/main/storage/          会话写入、磁盘索引、流式解析与查询
+src/main/resources/        资源采集、目录查询和离线协议
+src/main/export/           Worker、导出流水线、差分和 ZIP64
+src/preload/               两个沙箱入口，分别构建成单文件 CJS
+src/recorder/              节点、快照、操作、DOM 变化和观察生命周期
+src/replay/                独立回放调度、数据校验和 DOM 重建
+src/renderer/shell/        会话、时间线、详情和导出界面
+src/renderer/replay-panel.ts 播放器控件与回放内核适配
+src/shared/contracts/      跨环境数据与 IPC 契约
+src/shared/resource-urls.ts 纯 HTML/CSS 资源 URL 改写
+src/restore.py             Python 离线恢复工具
+src/demo/                  本地演示页
+out/                       生成的运行产物（不提交）
+test/                      针对构建产物的回归与编译期契约检查
+scripts/                   构建、桌面验收、大记录和便携版验证
 ```
 
 工作台与被采集网页使用独立 WebContents。远程页面关闭 Node.js 集成，开启 sandbox、context isolation 和 web security；采集器不向网页主执行环境公开 IPC 接口。ZIP 中的字段和覆盖说明以 `AGENT_README.md` 为准。
 
 Agent 直接控制软件的 MCP / Playwright 接入已完成独立调研与隔离原型验证，方案见 `docs/agent-control-design.md`；0.2.0 尚未开放正式 Agent 控制接口。
+
+## TypeScript 开发与验证
+
+`npm run typecheck` 分别检查主进程、preload/采集器、renderer/回放及类型契约。均开启 `strict`、`noUncheckedIndexedAccess` 和 `exactOptionalPropertyTypes`。类型不会替代 IPC 和磁盘数据的运行时校验；原始时间线与导出仍保留完整数据。
+
+`npm run compile` 生成全部入口和静态资源。`npm run verify` 依次执行类型检查、回归测试、真实桌面录制、离线回放、跨页面资源归属、后台导出和默认 1 GiB 大记录验收。macOS 可用 `TRACEDOCK_PYTHON=python3 PYTHON=python3 npm run verify`；Windows 安装 Python 并将 `python` 加入 PATH 后直接运行。
+
+`npm run build` 生成 Windows portable EXE；在 Windows 上继续执行 `npm run test:portable` 验证原生启动与重复启动。构建出的应用只使用 `out/` 下的 JS 和资源。测试夹具与验证脚本保留为 Node CJS，通过实际 JS 产物测试运行时行为；Python 恢复工具继续独立工作。
+
+模块边界及迁移验收见 `docs/typescript-migration.md`。
+
+[Windows CI](https://github.com/MixGeekers/echoo_web_replayer/actions/workflows/windows-verify.yml) 在 push、PR 和手动触发时执行完整验收、便携包构建及 Windows 原生运行测试。运行页面提供验收报告、截图和日志；全部通过后可下载该提交构建的 Windows 便携包。
