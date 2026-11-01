@@ -267,6 +267,64 @@ async function child(command, args, marker = mark) {
   });
 }
 
+async function runPhase(name, task, observe) {
+  const started = performance.now();
+  console.log(`[large] ${name} started`);
+  let observation = Promise.resolve(), observing = false;
+  const progress = () => {
+    if (observing || !observe) return observation;
+    observing = true;
+    observation = observe().then(details => {
+      console.log(`[large] ${name} after ${Math.round((performance.now() - started) / 1000)}s: ${details}`);
+    }).catch(error => {
+      // Diagnostics must not change the benchmark's result or its workload.
+      console.log(`[large] ${name} progress unavailable: ${error.message}`);
+    }).finally(() => { observing = false; });
+    return observation;
+  };
+  const timer = observe ? setInterval(progress, 30000) : null;
+  try {
+    const result = await task();
+    if (timer) clearInterval(timer);
+    await observation;
+    await progress();
+    console.log(`[large] ${name} completed in ${((performance.now() - started) / 1000).toFixed(1)}s`);
+    return result;
+  } catch (error) {
+    console.log(`[large] ${name} failed after ${((performance.now() - started) / 1000).toFixed(1)}s`);
+    throw error;
+  } finally {
+    if (timer) clearInterval(timer);
+    await observation;
+  }
+}
+
+async function observeRestoration(directory, restored, fixture, timelineOnly) {
+  const existing = new Set(await fsp.readdir(directory));
+  const missingAs = (fallback) => error => {
+    if (error.code === 'ENOENT') return fallback;
+    throw error;
+  };
+  return async () => {
+    // restore.py writes into its own temporary result directory, then renames it
+    // atomically. Inspect file metadata only; never read/parse the large payloads.
+    const names = await fsp.readdir(directory);
+    const candidates = [restored, ...names
+      .filter(name => name.startsWith('.tracedock-restore-') && !existing.has(name))
+      .map(name => path.join(directory, name, 'result'))];
+    let timelineBytes = 0, htmlFiles = 0;
+    for (const candidate of candidates) {
+      const stat = await fsp.stat(path.join(candidate, 'timeline.jsonl')).catch(missingAs(null));
+      const snapshots = await fsp.readdir(path.join(candidate, 'snapshots')).catch(missingAs([]));
+      timelineBytes = Math.max(timelineBytes, stat?.size || 0);
+      htmlFiles = Math.max(htmlFiles, snapshots.filter(name => /^\d+\.html$/.test(name)).length);
+    }
+    // A present file may still be growing. Byte equality and HTML hashes remain
+    // checked by the separate verification phase; these are observed sizes only.
+    return `timeline file ${timelineBytes}/${fixture.timeline.bytes} bytes; HTML files present ${htmlFiles}/${timelineOnly ? 0 : fixture.snapshots.length} (not yet verified)`;
+  };
+}
+
 async function main() {
   if (flag('--help') || flag('-h')) {
     console.log('Usage: node scripts/large-recording.cjs [--gib 1] [--event-mib 64] [--encoding delta|full] [--compression deflate|store] [--timeline-only] [--reuse output/large-recording-...]');
@@ -298,20 +356,21 @@ async function main() {
   const argsFor = name => [__filename, '--phase', name, '--directory', directory, '--gib', String(config.gib), '--event-mib', String(config.eventMiB), '--encoding', config.encoding, '--compression', config.compression, ...(config.timelineOnly ? ['--timeline-only'] : [])];
   try {
     console.log(`Synthetic recording benchmark: ${directory}`);
-    if (!flag('--reuse')) report.phases.generate = await child(process.execPath, argsFor('generate'));
-    if (!flag('--skip-store')) report.phases.index = await child(process.execPath, argsFor('index'));
+    if (!flag('--reuse')) report.phases.generate = await runPhase('generate', () => child(process.execPath, argsFor('generate')));
+    if (!flag('--skip-store')) report.phases.index = await runPhase('index and search', () => child(process.execPath, argsFor('index')));
     await save();
-    report.phases.export = await child(process.execPath, argsFor('export'));
+    report.phases.export = await runPhase('export', () => child(process.execPath, argsFor('export')));
     await save();
     const filename = path.join(directory, `${config.encoding}-${config.compression}.zip`);
     const script = path.join(directory, 'bundled-restore.py');
     const wrapper = path.join(directory, 'measure-python.py');
     await fsp.writeFile(wrapper, pythonWrapper);
-    await child(python, ['-c', 'import pathlib,sys,zipfile\nz=zipfile.ZipFile(sys.argv[1])\nfor name,out in [("restore.py",sys.argv[2]),("session.json",sys.argv[3])]:\n info=z.getinfo(name)\n assert info.file_size < 4*1024*1024\n pathlib.Path(out).write_bytes(z.read(info))', filename, script, path.join(directory, 'bundled-session.json')]);
+    await runPhase('extract bundled restorer', () => child(python, ['-c', 'import pathlib,sys,zipfile\nz=zipfile.ZipFile(sys.argv[1])\nfor name,out in [("restore.py",sys.argv[2]),("session.json",sys.argv[3])]:\n info=z.getinfo(name)\n assert info.file_size < 4*1024*1024\n pathlib.Path(out).write_bytes(z.read(info))', filename, script, path.join(directory, 'bundled-session.json')]));
     const restored = path.join(directory, `restored-${config.encoding}-${config.compression}`);
-    report.phases.restore = await child(python, [wrapper, script, filename, '--output', restored, ...(config.timelineOnly ? ['--timeline-only'] : [])], 'TRACEDOCK_PYTHON_METRICS ');
-    report.phases.verify = await child(process.execPath, argsFor('verify'));
     const fixture = JSON.parse(await fsp.readFile(path.join(directory, 'fixture.json'), 'utf8'));
+    const observe = await observeRestoration(directory, restored, fixture, config.timelineOnly);
+    report.phases.restore = await runPhase('Python restore', () => child(python, [wrapper, script, filename, '--output', restored, ...(config.timelineOnly ? ['--timeline-only'] : [])], 'TRACEDOCK_PYTHON_METRICS '), observe);
+    report.phases.verify = await runPhase('verify original bytes and HTML hashes', () => child(process.execPath, argsFor('verify')));
     report.timeline = fixture.timeline;
     report.dataZipRatio = report.phases.export.zipBytes / fixture.timeline.bytes;
     report.passed = true;

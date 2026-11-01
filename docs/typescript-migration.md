@@ -40,7 +40,7 @@
 
 上述本机验收在 macOS 上执行，不能验证 portable EXE 的 Windows 原生运行。Windows 打包成功与 ASAR 检查不代表 Windows 启动验收通过。
 
-Windows 原生验收配置在 `.github/workflows/windows-verify.yml`：Windows runner 安装固定锁文件依赖，执行完整 verify、portable 构建及原生启动验收。每次 push、PR 或手动触发都会运行；无论成功或失败均上传轻量报告、截图和日志，全部通过后上传 portable EXE。远端验收以相应提交的 [Windows verification 运行结果](https://github.com/MixGeekers/echoo_web_replayer/actions/workflows/windows-verify.yml) 为准。
+Windows 原生验收配置在 `.github/workflows/windows-verify.yml`：Windows runner 安装固定锁文件依赖，分步骤执行与完整 verify 相同的检查，以及 portable 构建及原生启动验收。各步骤分别设置超时；耗时较长的 1 GiB 恢复安排在桌面及便携包验证后。每次 push、PR 或手动触发都会运行；无论成功或失败均上传轻量报告、截图和日志，全部通过后上传 portable EXE，不创建 GitHub Release。远端验收以相应提交的 [Windows verification 运行结果](https://github.com/MixGeekers/echoo_web_replayer/actions/workflows/windows-verify.yml) 为准。
 
 ## 跨页面资源归属竞态修复
 

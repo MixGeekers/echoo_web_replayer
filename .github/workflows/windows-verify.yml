@@ -8,7 +8,7 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
     env:
       PYTHON: python
       TRACEDOCK_PYTHON: python
@@ -23,12 +23,33 @@ jobs:
           python-version: '3.12'
       - name: Install locked dependencies
         run: npm ci
-      - name: Verify types, recording, replay, resources, export, and large recordings
-        run: npm run verify
+      - name: Check strict TypeScript contracts
+        timeout-minutes: 3
+        run: npm run typecheck
+      - name: Run unit and integration regressions
+        timeout-minutes: 5
+        run: npm test
+      - name: Verify desktop recording and exports
+        timeout-minutes: 5
+        run: npm run test:smoke
+      - name: Verify offline replay
+        timeout-minutes: 3
+        run: npm run test:replay
+      - name: Verify cross-page resource ownership
+        timeout-minutes: 3
+        run: npm run test:resource-navigation
+      - name: Verify background export cancellation
+        timeout-minutes: 5
+        run: npm run test:export-desktop
       - name: Build Windows portable application
-        run: npm run build
+        timeout-minutes: 10
+        run: npm run build -- --publish never
       - name: Verify native portable application
+        timeout-minutes: 5
         run: npm run test:portable
+      - name: Verify 1 GiB recording export and restoration
+        timeout-minutes: 25
+        run: npm run test:large
       - name: Upload verification reports
         if: always()
         uses: actions/upload-artifact@v7.0.2
