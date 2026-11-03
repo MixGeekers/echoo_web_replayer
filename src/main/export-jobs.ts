@@ -10,6 +10,7 @@ import type {
   ExportResult,
 } from "../shared/contracts/export";
 import { errorMessage, object } from "../shared/runtime";
+import { readAnnotationFile } from "./storage/annotation-store";
 export interface ExportRequest extends ExportOptions {
   sessionId: string;
 }
@@ -45,7 +46,7 @@ export function createExportJobs(
     job: ExportJob,
     destination?: string,
   ): Promise<ExportOutcome> {
-    const { sessionId, encoding, compression } = input;
+    const { sessionId, encoding, compression, range } = input;
     const selected = store.getSession(sessionId);
     if (selected.libraryState === "trashed") throw new Error("请先从回收站恢复会话");
     const result = destination ? {canceled: false, filePath: destination} : await dialog.showSaveDialog(win, {
@@ -68,7 +69,10 @@ export function createExportJobs(
         currentSession()?.status === "recording"
       )
         await checkpoint("snapshot", "export");
-      return store.capture(sessionId);
+      const boundary = await store.capture(sessionId);
+      // Annotations are read at the same boundary; the worker clips them to the exported seqs.
+      const annotations = await readAnnotationFile(store.getSessionDirectory(sessionId), sessionId);
+      return { ...boundary, annotations };
     });
     if (job.controller.signal.aborted) throw canceledExport();
     let lastProgressAt = 0;
@@ -79,6 +83,7 @@ export function createExportJobs(
       appVersion: app.getVersion(),
       encoding,
       compression,
+      range,
       signal: job.controller.signal,
       onProgress: (progress) => {
         const now = Date.now();

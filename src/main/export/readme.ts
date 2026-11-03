@@ -12,6 +12,8 @@ export function agentReadme(
   capturedAt: string,
   appVersion: string,
   { encoding = "delta", compression = "deflate" }: ExportOptions = {},
+  /** Optional sections placed before the restore steps (annotations, range). */
+  preface = "",
 ) {
   return `# TraceDock · Agent 分析说明
 
@@ -25,7 +27,7 @@ export function agentReadme(
 - 截点状态：${metadata.status}
 - 已纳入事件：${metadata.eventCount} 条（序号至 ${metadata.lastSeq}）
 - 数据处理：V1 不做数据脱敏；页面内容、输入值（包括密码字段）按实际采集结果保留。
-
+${preface}
 ## 先恢复并验证
 
 本包容器格式为 V2；数据编码：${encoding === "delta" ? "无损差分" : "完整文件"}；ZIP 压缩：${compression === "deflate" ? "DEFLATE" : "关闭（STORE）"}。

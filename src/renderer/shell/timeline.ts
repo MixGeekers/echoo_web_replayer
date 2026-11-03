@@ -16,6 +16,10 @@ interface Options {
   state(): AppState;
   active(): boolean | null;
   notify(title: string, message?: string, error?: boolean): void;
+  /** Optional row decoration, such as an annotation bookmark marker. */
+  decorate?(button: HTMLButtonElement, event: EventPreview): void;
+  /** Called when the details panel shows an event. */
+  inspected?(event: EventPreview | null): void;
 }
 export function createTimeline(
   api: CollectorAPI,
@@ -171,6 +175,7 @@ export function createTimeline(
       body.append(first, summary, seq);
       button.append(icon, body);
       button.addEventListener("click", () => inspectEvent(event));
+      options.decorate?.(button, event);
       fragment.append(button);
     });
     list.replaceChildren(fragment);
@@ -331,6 +336,7 @@ export function createTimeline(
     el("detail-meta", "div").textContent =
       `#${event.seq} · ${formatTime(event.timestamp)} · ${event.url || "本地记录"}`;
     el("detail-json", "pre").textContent = "正在读取事件…";
+    options.inspected?.(event);
     renderTimeline();
     if (replay.active) replay.seek(undefined, event.seq);
     const full = await run(() =>
@@ -383,12 +389,14 @@ export function createTimeline(
   el("close-detail-button", "button").addEventListener("click", () => {
     selectedEventId = null;
     el("event-detail", "div").hidden = true;
+    options.inspected?.(null);
     renderTimeline();
   });
   return {
     refresh: refreshTimeline,
     schedule: scheduleRefresh,
     render: renderTimeline,
+    inspect: inspectEvent,
     get follow() {
       return follow;
     },

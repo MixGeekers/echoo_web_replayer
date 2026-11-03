@@ -429,6 +429,7 @@ async function deriveFiles({
   staging,
   metadata,
   capturedAt,
+  preface = "",
   onFile = async () => {},
   onSnapshot = async () => {},
   signal,
@@ -439,6 +440,8 @@ async function deriveFiles({
   staging: string;
   metadata: Pick<SessionMetadata, "id" | "name">;
   capturedAt: string;
+  /** Optional Markdown placed before the event table, such as human annotations. */
+  preface?: string;
   onFile?: (item: FileEntry) => Promise<unknown>;
   onSnapshot?: (item: SnapshotEntry) => Promise<unknown>;
 }) {
@@ -600,7 +603,7 @@ async function deriveFiles({
   }
   try {
     await markdown.write(
-      `# ${cell(metadata.name)} · 完整事件索引\n\n会话：${cell(metadata.id)}  \n导出截点：${cell(capturedAt)}  \n原始数据见 timeline.jsonl；摘要仅供检索。\n\n| 序号 | 相对时间 | UTC 时间 | 类型 | 摘要 | 快照 |\n| --- | --- | --- | --- | --- | --- |\n`,
+      `# ${cell(metadata.name)} · 完整事件索引\n\n会话：${cell(metadata.id)}  \n导出截点：${cell(capturedAt)}  \n原始数据见 timeline.jsonl；摘要仅供检索。\n\n${preface}| 序号 | 相对时间 | UTC 时间 | 类型 | 摘要 | 快照 |\n| --- | --- | --- | --- | --- | --- |\n`,
     );
     for await (const token of tokens as AsyncIterable<JsonToken>) {
       if ((++processed & 1023) === 0) {

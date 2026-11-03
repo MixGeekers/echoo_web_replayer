@@ -42,6 +42,9 @@ await build({
     "delta-codec": "src/main/export/delta-codec.ts",
     "delta-zip": "src/main/export/zip.ts",
     "resource-recorder": "src/main/resources/index.ts",
+    "annotation-store": "src/main/storage/annotation-store.ts",
+    annotations: "src/main/annotations.ts",
+    "export-range": "src/main/export/range.ts",
   },
 });
 await build({

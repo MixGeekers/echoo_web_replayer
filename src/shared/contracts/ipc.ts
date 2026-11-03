@@ -6,6 +6,7 @@ export type {
   BrowserBounds,
 } from "./ui";
 import type { CollectorAPI } from "./ui";
+import type { AnnotationChannel } from "./annotations";
 export type InvokeChannel =
   | "mcpCommand"
   | "mcpConfig"
@@ -50,7 +51,8 @@ export type InvokeChannel =
   | "snapshot"
   | "exportSession"
   | "cancelExport"
-  | "revealExport";
+  | "revealExport"
+  | AnnotationChannel;
 export type InvokeArgs<K extends InvokeChannel> = Parameters<CollectorAPI[K]>;
 export type InvokeResult<K extends InvokeChannel> = Awaited<
   ReturnType<CollectorAPI[K]>

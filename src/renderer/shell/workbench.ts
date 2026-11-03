@@ -2,6 +2,7 @@ import { createLifecycleUI } from "./lifecycle";
 import { createTimeline } from "./timeline";
 import { createExportUI } from "./export";
 import { createMCPUI } from "./mcp";
+import { createAnnotationsUI } from "./annotations";
 import { formatDate, count, statusName } from "./format";
 import { element as el, required, message } from "./dom";
 import { svg } from "./icons";
@@ -52,12 +53,24 @@ export function startWorkbench(): void {
   const selectedSession = () =>
     state.sessions.find((s) => s.id === selectedSessionId) ||
     (state.session?.id === selectedSessionId ? state.session : null);
+  const annotations = createAnnotationsUI(api, {
+    sessionId: () => selectedSession() && lifecycle.effectiveState(selectedSession()!) === "trashed" ? null : selectedSessionId,
+    selectedSession,
+    state: () => state,
+    active,
+    busy: () => busy,
+    inspect: (event) => timeline.inspect(event),
+    repaintTimeline: () => timeline.render(),
+    notify,
+  });
   const timeline = createTimeline(api, replay, {
     sessionId: () => selectedSession() && lifecycle.effectiveState(selectedSession()!) === "trashed" ? null : selectedSessionId,
     selectedSession,
     state: () => state,
     active,
     notify,
+    decorate: (button, event) => annotations.decorate(button, event),
+    inspected: (event) => annotations.inspected(event),
   });
   const exportUI = createExportUI(api, {
     sessionId: () => selectedSessionId,
@@ -67,6 +80,7 @@ export function startWorkbench(): void {
     showDialog,
     closeDialog,
     notify,
+    range: () => annotations.range(),
   });
 
   const lifecycle = createLifecycleUI({
@@ -398,6 +412,7 @@ export function startWorkbench(): void {
     lifecycle.render();
     renderSessions();
     mcp.render();
+    annotations.sync();
     scheduleBounds();
   }
 

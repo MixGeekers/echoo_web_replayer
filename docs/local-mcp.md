@@ -49,7 +49,10 @@ stdio 进程只向 stdout 输出 MCP 协议，诊断与配对码写入 stderr。
 | 环境与记录库（8） | `state`, `profiles_list`, `profile_manage`, `session_manage`, `library_query`, `library_update`, `library_delete_plan`, `library_delete_apply` |
 | 控制权与网页（10） | `control`, `observe`, `navigate`, `click`, `fill`, `press`, `select`, `scroll`, `wait`, `screenshot` |
 | 采集与证据（7） | `recording_start`, `recording_control`, `recording_rename`, `timeline`, `event`, `recording_inspect`, `replay_seek` |
+| 标注（2） | `annotations`, `annotation_add` |
 | 导出与任务（3） | `export_start`, `operation_get`, `operation_cancel` |
+
+`annotations` 返回采集记录的人工与 Agent 书签/注释（按 seq 排序，含 `revision`），只需读取权限；分析长记录时先读它，从用户标记的位置开始。`annotation_add` 以 `author:"agent"` 在已保存事件上添加注释，可带包含式 `endSeq`；需要“整理记录库”权限，带唯一 `commandId`，建议把 `annotations` 返回的 `revision` 作为 `expectedAnnotationsRevision`，冲突时返回 `REVISION_CONFLICT`。注释不修改时间线事实；回收站中的记录不能添加。`export_start` 可用 `rangeStartSeq` / `rangeEndSeq` 只导出片段，起点自动前移到最近快照。
 
 永久删除必须先产生包含隐藏子记录的计划，再由用户在桌面端确认准确范围，最后调用 apply。计划 5 分钟过期；对象或范围变化必须重新预览。工具参数中的 `confirmed:true` 不能授权。
 

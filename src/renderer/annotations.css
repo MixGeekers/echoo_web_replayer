@@ -1,0 +1,56 @@
+/* Timeline bookmarks, notes and range export. Loaded by shell/annotations.ts. */
+.timeline-filters { grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); grid-template-columns: none; }
+.bookmark-filter { display: inline-flex; align-items: center; justify-content: center; gap: 3px; }
+.bookmark-count { min-width: 14px; height: 14px; padding: 0 3px; border-radius: var(--echo-radius-pill); background: var(--echo-surface-panel); color: var(--echo-text-muted); font: 10px/14px var(--echo-system-font-mono); }
+.bookmark-filter.has-bookmarks .bookmark-count { background: var(--echo-semantic-warning-background); color: var(--echo-semantic-warning-text); }
+.timeline-card.bookmark-mode #load-more-button { display: none; }
+
+.mark-button { display: inline-flex; align-items: center; gap: 4px; color: var(--echo-semantic-warning-text); }
+.mark-button svg, .annotation-form svg { width: 13px; height: 13px; }
+.mark-button:hover:not(:disabled) { background: var(--echo-semantic-warning-background); }
+
+.timeline-event.annotated { box-shadow: inset 2px 0 0 var(--echo-semantic-warning); }
+.timeline-event.in-annotation-range { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--echo-semantic-warning) 45%, transparent); }
+.annotation-flag { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: var(--echo-radius-xs); color: var(--echo-semantic-warning); }
+.annotation-flag svg { width: 12px; height: 12px; fill: currentColor; }
+.annotation-flag.agent { color: var(--echo-semantic-brand); }
+.event-annotation { display: block; margin-top: 3px; padding: 2px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-radius: var(--echo-radius-xs); background: var(--echo-semantic-warning-background); color: var(--echo-semantic-warning-text); font-size: var(--echo-system-font-xs); line-height: 16px; }
+
+.annotation-list { flex: 1; min-height: 0; overflow: auto; padding: 0 5px 5px; scrollbar-width: thin; scrollbar-color: var(--echo-sidebar-scrollbar-thumb) transparent; }
+.annotation-row { display: flex; align-items: flex-start; gap: 8px; width: 100%; padding: 9px 7px; border-radius: var(--echo-radius-xs); text-align: left; }
+.annotation-row:hover { background: var(--echo-surface-hover); }
+.annotation-row.selected { background: var(--echo-surface-selected); }
+.annotation-icon { display: grid; place-items: center; flex: none; width: 23px; height: 23px; border-radius: var(--echo-radius-sm); background: var(--echo-semantic-warning-background); color: var(--echo-semantic-warning); }
+.annotation-icon.agent { background: var(--echo-semantic-brand-soft); color: var(--echo-semantic-brand); }
+.annotation-icon svg { width: 12px; height: 12px; fill: currentColor; }
+.annotation-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.annotation-meta, .annotation-type { color: var(--echo-text-muted); font: 10px/14px var(--echo-system-font-mono); }
+.annotation-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--echo-text-primary); font-size: var(--echo-system-font-sm); }
+
+.annotation-editor { flex: none; display: flex; flex-direction: column; gap: 6px; padding: 7px 10px; border-top: 1px solid var(--echo-border-default); background: var(--echo-surface-panel); }
+.annotation-notes { display: flex; flex-direction: column; gap: 4px; max-height: 72px; overflow: auto; }
+.annotation-note { display: flex; align-items: flex-start; gap: 7px; padding: 5px 6px; border-radius: var(--echo-radius-xs); background: var(--echo-semantic-warning-background); }
+.annotation-note.editing { outline: 1px solid var(--echo-semantic-warning); }
+.annotation-note .annotation-icon { width: 18px; height: 18px; background: transparent; }
+.annotation-note-body { flex: 1; min-width: 0; }
+.annotation-note-body p { margin: 0; color: var(--echo-text-primary); font-size: var(--echo-system-font-xs); line-height: 17px; overflow-wrap: anywhere; }
+.annotation-note-body small { color: var(--echo-text-muted); font-size: 10px; }
+.annotation-note .text-button { flex: none; height: 18px; padding: 0 3px; font-size: 10px; }
+.annotation-delete { color: var(--echo-semantic-danger-text); }
+.annotation-form { display: flex; gap: 6px; align-items: flex-end; margin: 0; }
+.annotation-form textarea { flex: 1; min-width: 0; resize: none; padding: 5px 7px; border: 1px solid var(--echo-border-default); border-radius: var(--echo-radius-xs); background: var(--echo-surface-panel); color: var(--echo-text-primary); font: var(--echo-system-font-xs)/1.5 var(--echo-system-font-family); }
+.annotation-form textarea:focus-visible { outline: 2px solid var(--echo-semantic-focus); outline-offset: 0; }
+.annotation-form-actions { display: flex; flex-direction: column; gap: 4px; }
+.annotation-form .button { display: inline-flex; align-items: center; justify-content: center; gap: 4px; white-space: nowrap; }
+
+.export-range { border: 0; padding: 0; margin: 14px 0 0; min-width: 0; }
+.export-range legend { margin-bottom: 7px; padding: 0; color: var(--echo-text-secondary); font-size: var(--echo-system-font-sm); }
+.export-range-modes { display: flex; gap: 18px; }
+.dialog .export-range-modes label { display: flex; align-items: center; gap: 6px; margin: 0; cursor: pointer; }
+.dialog .export-range-modes input { flex: none; width: 14px; height: 14px; margin: 0; padding: 0; accent-color: var(--echo-semantic-brand); }
+.export-range-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px 10px; margin-top: 9px; padding: 10px; border: 1px solid var(--echo-border-default); border-radius: var(--echo-radius-xs); }
+.export-range-fields[hidden] { display: none; }
+.dialog .export-range-fields label { display: flex; flex-direction: column; gap: 4px; min-width: 0; margin: 0; color: var(--echo-text-muted); font-size: var(--echo-system-font-xs); }
+.dialog .export-range-fields select, .dialog .export-range-fields input { box-sizing: border-box; width: 100%; height: 30px; min-width: 0; padding: 0 6px; font-size: var(--echo-system-font-xs); }
+.export-range-hint { grid-column: 1 / -1; margin: 0; color: var(--echo-text-muted); font-size: var(--echo-system-font-xs); line-height: 1.6; }
+.export-range-hint.error { color: var(--echo-semantic-danger-text); }

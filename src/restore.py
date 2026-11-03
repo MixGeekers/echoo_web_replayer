@@ -518,9 +518,53 @@ def derive_snapshot(timeline, target, event, payload_range, report):
     return {"eventId":event.get("id"), "seq":seq, "documentId":event.get("documentId"), "html":html_name, "state":state_name}
 
 
-def scan_timeline(timeline, manifest, target, report, derive):
+ANNOTATION_ID = re.compile(r"^annotation-[a-f0-9-]{36}$")
+
+
+def read_annotations(path, manifest):
+    """Validate optional human/agent notes; they reference seqs inside the exported timeline."""
+    data = strict_json(path.read_bytes())
+    require(isinstance(data, dict) and data.get("format") == "tracedock-annotations" and data.get("schemaVersion") == 1, "Unsupported annotations.json")
+    require(data.get("recordingId") == manifest.get("sessionId"), "annotations.json recording mismatch")
+    integer(data.get("revision"), "annotations revision")
+    items = data.get("annotations")
+    require(isinstance(items, list) and len(items) <= 1000, "Invalid annotations list")
+    declared = manifest.get("annotations")
+    if declared is not None:
+        require(isinstance(declared, dict) and declared.get("path") == "annotations.json" and declared.get("count") == len(items), "annotations.json count mismatch")
+    first = manifest["range"].get("startSeq", 1) if isinstance(manifest.get("range"), dict) else 1
+    ids = set()
+    for item in items:
+        require(isinstance(item, dict) and isinstance(item.get("id"), str) and ANNOTATION_ID.fullmatch(item["id"]) and item["id"] not in ids, "Invalid annotation id")
+        ids.add(item["id"])
+        seq = integer(item.get("seq"), "annotation seq", 1)
+        require(first <= seq <= manifest["lastSeq"], "Annotation seq outside exported timeline")
+        if item.get("endSeq") is not None:
+            require(seq <= integer(item.get("endSeq"), "annotation endSeq", 1) <= manifest["lastSeq"], "Annotation endSeq outside exported timeline")
+        require(item.get("author") in ("user", "agent") and isinstance(item.get("text"), str) and item["text"].strip(), "Invalid annotation text/author")
+        elapsed = item.get("elapsedMs")
+        require(isinstance(elapsed, (int, float)) and not isinstance(elapsed, bool) and elapsed >= 0, "Invalid annotation elapsedMs")
+    return sorted(items, key=lambda item: item["seq"])
+
+
+def annotation_markdown(items, manifest):
+    text = ""
+    if items:
+        text += "## 人工标注\n\n| 序号 | 结束序号 | 相对时间 | UTC 时间 | 事件类型 | 来源 | 标注 |\n| --- | --- | --- | --- | --- | --- | --- |\n"
+        for item in items:
+            end = item.get("endSeq")
+            text += f'| {item["seq"]} | {"" if end is None else end} | {item["elapsedMs"] / 1000:.3f}s | {md_cell(item.get("timestamp"))} | {md_cell(item.get("eventType"))} | {"Agent" if item["author"] == "agent" else "人工"} | {md_cell(item["text"])} |\n'
+        text += "\n"
+    selected = manifest.get("range")
+    if isinstance(selected, dict):
+        text += f'## 片段范围\n\n请求 seq {selected.get("requestedStartSeq")}–{selected.get("requestedEndSeq")}；导出 seq {selected.get("startSeq")}–{selected.get("endSeq")}。\n\n'
+    return text + "## 事件\n\n" if text else ""
+
+
+def scan_timeline(timeline, manifest, target, report, derive, annotations=()):
     counts = {"events":0, "actions":0, "mutationBatches":0, "snapshots":0}
     last_seq = 0
+    first_seq = None
     with contextlib.ExitStack() as stack:
         handle = stack.enter_context(timeline.open("rb"))
         raw = stack.enter_context(timeline.open("rb"))
@@ -528,7 +572,7 @@ def scan_timeline(timeline, manifest, target, report, derive):
         markdown = stack.enter_context((target / "timeline.md").open("w", encoding="utf-8", errors="backslashreplace", newline="\n")) if derive else None
         snapshot_index = stack.enter_context((target / "snapshots.jsonl").open("w", encoding="ascii", newline="\n")) if derive else None
         if markdown:
-            markdown.write("# 完整事件索引\n\n原始事实见 timeline.jsonl；此文件仅为派生阅读索引。\n\n| 序号 | 相对时间 | UTC 时间 | 类型 | 摘要 | 快照 |\n| --- | --- | --- | --- | --- | --- |\n")
+            markdown.write("# 完整事件索引\n\n原始事实见 timeline.jsonl；此文件仅为派生阅读索引。\n\n" + annotation_markdown(annotations, manifest) + "| 序号 | 相对时间 | UTC 时间 | 类型 | 摘要 | 快照 |\n| --- | --- | --- | --- | --- | --- |\n")
         while True:
             reader.whitespace()
             if reader.peek() is None:
@@ -561,6 +605,7 @@ def scan_timeline(timeline, manifest, target, report, derive):
             require(seq > last_seq, "Timeline seq is not strictly increasing")
             require(isinstance(event.get("type"), str), "Invalid event type")
             last_seq = seq
+            if first_seq is None: first_seq = seq
             counts["events"] += 1
             counts["actions"] += int(event["type"].startswith("action."))
             counts["mutationBatches"] += int(event["type"] == "dom.mutation")
@@ -576,6 +621,9 @@ def scan_timeline(timeline, manifest, target, report, derive):
                 markdown.write(f'| {seq} | {elapsed / 1000:.3f}s | {md_cell(event.get("timestamp"))} | {md_cell(event["type"])} | {md_cell(event.get("summary", event["type"]))} | {link} |\n')
             require(reader.peek() is None or reader.peek() in b" \t\r\n", "Missing timeline record separator")
     require(counts["events"] == manifest["eventCount"] and last_seq == manifest["lastSeq"], "Timeline event count/lastSeq mismatch")
+    selected = manifest.get("range")
+    if selected is not None:
+        require(isinstance(selected, dict) and selected.get("startSeq") == first_seq and selected.get("endSeq") == last_seq and selected.get("eventCount") == counts["events"], "Timeline range mismatch")
     expected = manifest.get("counts", {})
     for key, value in counts.items():
         if key in expected:
@@ -699,7 +747,7 @@ def restore(source, destination, timeline_only=False):
         target.mkdir()
         if encoding == "delta":
             for name, in package.db.execute("SELECT path FROM entries"):
-                require(name in ("manifest.json", "files.jsonl", "session.json", "AGENT_README.md", "restore.py", "index.jsonl", "data.bin", "resources.jsonl") or re.fullmatch(r"assets/[a-f0-9]{64}", name), "Unexpected delta files")
+                require(name in ("manifest.json", "files.jsonl", "session.json", "AGENT_README.md", "restore.py", "index.jsonl", "data.bin", "resources.jsonl", "annotations.json") or re.fullmatch(r"assets/[a-f0-9]{64}", name), "Unexpected delta files")
             decode_delta(source_dir, target / "timeline.jsonl", manifest)
         else:
             require(hash_file(source_dir / "timeline.jsonl") == (timeline_size, timeline_hash), "Full timeline fact hash mismatch")
@@ -708,9 +756,14 @@ def restore(source, destination, timeline_only=False):
             (source_dir / name).replace(target / name)
         (target / "source-manifest.json").write_bytes(manifest_bytes)
         derived_files = 0
+        annotations = []
+        has_annotations = package.db.execute("SELECT 1 FROM entries WHERE path='annotations.json' AND expected_hash IS NOT NULL").fetchone() is not None
+        require(has_annotations or manifest.get("annotations") is None, "Declared annotations.json is missing")
+        if has_annotations:
+            annotations = read_annotations(source_dir / "annotations.json", manifest)
         with (target / "restored-files.jsonl").open("w", encoding="ascii", newline="\n") as report:
             facts = [record_file(target, name, report) for name in ("timeline.jsonl", "session.json")]
-            counts = scan_timeline(target / "timeline.jsonl", manifest, target, report, encoding == "delta" and not timeline_only)
+            counts = scan_timeline(target / "timeline.jsonl", manifest, target, report, encoding == "delta" and not timeline_only, annotations)
             if encoding == "delta" and not timeline_only:
                 derived_files = counts["snapshots"] * 2 + 2
             if encoding == "full" and not timeline_only:
@@ -722,14 +775,14 @@ def restore(source, destination, timeline_only=False):
                         record_file(target, name, report)
                         derived_files += 1
             for name, in package.db.execute("SELECT path FROM entries WHERE expected_hash IS NOT NULL ORDER BY path"):
-                if name == "resources.jsonl" or (not timeline_only and re.fullmatch(r"assets/[a-f0-9]{64}", name)):
+                if name in ("resources.jsonl", "annotations.json") or (not timeline_only and re.fullmatch(r"assets/[a-f0-9]{64}", name)):
                     output = target / name
                     output.parent.mkdir(parents=True, exist_ok=True)
                     (source_dir / name).replace(output)
                     record_file(target, name, report)
             record_file(target, "AGENT_README.md", report)
             record_file(target, "source-manifest.json", report)
-        summary = {"status":"ok", "schemaVersion":2, "encoding":encoding, "timelineOnly":timeline_only, "eventCount":counts["events"], "lastSeq":manifest["lastSeq"], "counts":counts, "timeline":facts[0], "facts":facts, "derivedFiles":derived_files, "checksums":"restored-files.jsonl"}
+        summary = {"status":"ok", "schemaVersion":2, "encoding":encoding, "timelineOnly":timeline_only, "eventCount":counts["events"], "lastSeq":manifest["lastSeq"], "counts":counts, "timeline":facts[0], "facts":facts, "derivedFiles":derived_files, "checksums":"restored-files.jsonl", "annotations":len(annotations), **({"range":manifest["range"]} if manifest.get("range") is not None else {})}
         (target / "restore-report.json").write_text(json.dumps(summary, ensure_ascii=True, indent=2) + "\n", encoding="ascii")
         package.close(); package = None
         require(not destination.exists(), "Output appeared during restore; refusing to overwrite")
