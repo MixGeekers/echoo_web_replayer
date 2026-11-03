@@ -85,5 +85,7 @@ const api: CollectorAPI = {
   onError: (callback) => subscribe("collector:error", callback),
   onExportProgress: (callback) =>
     subscribe("collector:exportProgress", callback),
+  onToggleFocusMode: (callback) =>
+    subscribe("shell:toggleFocusMode", callback),
 };
 contextBridge.exposeInMainWorld("collector", api);

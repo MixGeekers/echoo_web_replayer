@@ -154,7 +154,15 @@ export async function createWorkspace(win: BrowserWindow, demoURL: string) {
     const blockHumanInput = (event: Electron.Event) => {
       if(mcp?.controlled()&&!isAgentInputDispatch(browser.webContents)) event.preventDefault();
     };
-    browser.webContents.on("before-input-event",blockHumanInput);
+    browser.webContents.on("before-input-event",(event,input) => {
+      // 专注模式快捷键：焦点在内嵌网页时也能切换，且不传给网页。
+      if(input.type==="keyDown"&&(input.control||input.meta)&&input.shift&&!input.alt&&input.code==="KeyF"){
+        event.preventDefault();
+        if(!win.isDestroyed()) win.webContents.send("shell:toggleFocusMode");
+        return;
+      }
+      blockHumanInput(event);
+    });
     browser.webContents.on("before-mouse-event",blockHumanInput);
     browser.setBackgroundColor("#ffffff");
     browserState = {available:true,url:demoURL,title:"交互实验室",loading:false,canGoBack:false,canGoForward:false,error:null};

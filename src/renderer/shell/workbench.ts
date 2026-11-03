@@ -4,6 +4,7 @@ import { createExportUI } from "./export";
 import { createMCPUI } from "./mcp";
 import { createAnnotationsUI } from "./annotations";
 import { createCodegenUI } from "./codegen";
+import { createFocusMode } from "./focus";
 import { formatDate, count, statusName } from "./format";
 import { element as el, required, message } from "./dom";
 import { svg } from "./icons";
@@ -585,6 +586,10 @@ export function startWorkbench(): void {
       el("address-input", "input").focus();
       el("address-input", "input").select();
     }
+  });
+  createFocusMode({
+    boundsChanged: scheduleBounds,
+    onToggleRequest: api?.onToggleFocusMode,
   });
   new ResizeObserver(scheduleBounds).observe(el("browser-surface", "div"));
   window.addEventListener("resize", scheduleBounds);
