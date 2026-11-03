@@ -24,7 +24,9 @@ const root = path.resolve(__dirname, '..');
   let app;
   const checks = [];
   try {
-    app = await _electron.launch({args:[main], env: {...process.env, ELECTRON_RUN_AS_NODE: ''}});
+    // 与其他桌面验收一致：删除而不是置空 ELECTRON_RUN_AS_NODE，Windows 上空值仍会让 Electron 以 Node 模式启动。
+    const env = {...process.env}; delete env.ELECTRON_RUN_AS_NODE;
+    app = await _electron.launch({executablePath:require('electron'),args:[main],cwd:root,env,timeout:30000});
     await app.firstWindow();
     await (await app.firstWindow()).waitForLoadState();
     await app.evaluate(async()=>{for(let i=0;i<100&&!globalThis.agentBrowser;i++)await new Promise(r=>setTimeout(r,20));});
