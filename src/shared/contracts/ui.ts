@@ -17,6 +17,7 @@ import type { ExportProgress, ExportResult } from "./export";
 import type { ResourceSummary } from "./resources";
 import type { LibraryBatchInput } from "./library";
 import type { MCPState, MCPCommand, MCPConfig } from "./mcp";
+import type { AnnotationAPI, ExportRange } from "./annotations";
 export type { LibraryBatchAction, LibraryBatchInput } from "./library";
 export type {
   SessionMetadata,
@@ -63,8 +64,9 @@ export type EventDetail = DetailPreview | StoredEvent;
 export interface ExportOptions {
   encoding: "delta" | "full";
   compression: "deflate" | "store";
+  range?: ExportRange | undefined;
 }
-export interface CollectorAPI {
+export interface CollectorAPI extends AnnotationAPI {
   mcpCommand(input: MCPCommand): Promise<AppState>;
   mcpConfig(): Promise<MCPConfig>;
   getState(): Promise<AppState>;

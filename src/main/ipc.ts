@@ -13,6 +13,7 @@ import { object } from "../shared/runtime";
 import { parseLibraryBatch } from "./library-batch";
 import type { MCPController } from "./mcp/controller";
 import type { MCPCommand, MCPConfig } from "../shared/contracts/mcp";
+import { installAnnotationIPC, parseExportRange } from "./annotations-ipc";
 const string = (value: unknown): string => {
   if (typeof value !== "string") throw new Error("参数必须为字符串");
   return value;
@@ -171,6 +172,7 @@ export function installIPC({win,workspace,demoURL,mcp,mcpConfig}: Options) {
       sessionId: string(q.sessionId),
       encoding,
       compression,
+      range: parseExportRange(q.range),
     })};}).then(value => value.result);
   });
   handle("cancelExport", jobs.cancel);
@@ -179,6 +181,7 @@ export function installIPC({win,workspace,demoURL,mcp,mcpConfig}: Options) {
     if (!session.lastExportPath) throw new Error("此会话尚未导出");
     shell.showItemInFolder(session.lastExportPath);
   });
+  installAnnotationIPC(win, workspace, handle);
   ipcMain.on("collector:setBrowserBounds", (event, value: unknown) => {
     try {
       shellCaller(event);

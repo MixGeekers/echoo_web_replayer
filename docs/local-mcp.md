@@ -49,9 +49,12 @@ stdio 进程只向 stdout 输出 MCP 协议，诊断与配对码写入 stderr。
 | 环境与记录库（8） | `state`, `profiles_list`, `profile_manage`, `session_manage`, `library_query`, `library_update`, `library_delete_plan`, `library_delete_apply` |
 | 控制权与网页（10） | `control`, `observe`, `navigate`, `click`, `fill`, `press`, `select`, `scroll`, `wait`, `screenshot` |
 | 采集与证据（8） | `recording_start`, `recording_control`, `recording_rename`, `timeline`, `event`, `recording_inspect`, `replay_seek`, `network` |
+| 标注（2） | `annotations`, `annotation_add` |
 | 导出与任务（3） | `export_start`, `operation_get`, `operation_cancel` |
 
 `network` 只读，需要读取权限：按 seq 扫描指定记录的 `network.*` / `console.*` 事件，可按类型（`request`、`response`、`failed`、`message`、`exception` 等）、HTTP 状态区间（`statusMin` / `statusMax`）、URL 子串和控制台 level 过滤，单次最多扫描 1 万条事件，用 `nextAfterSeq` 与 `snapshotSeq` 继续。请求头、响应头和正文用 `event` 读取。
+
+`annotations` 返回采集记录的人工与 Agent 书签/注释（按 seq 排序，含 `revision`），只需读取权限；分析长记录时先读它，从用户标记的位置开始。`annotation_add` 以 `author:"agent"` 在已保存事件上添加注释，可带包含式 `endSeq`；需要“整理记录库”权限，带唯一 `commandId`，建议把 `annotations` 返回的 `revision` 作为 `expectedAnnotationsRevision`，冲突时返回 `REVISION_CONFLICT`。注释不修改时间线事实；回收站中的记录不能添加。`export_start` 可用 `rangeStartSeq` / `rangeEndSeq` 只导出片段，起点自动前移到最近快照。
 
 永久删除必须先产生包含隐藏子记录的计划，再由用户在桌面端确认准确范围，最后调用 apply。计划 5 分钟过期；对象或范围变化必须重新预览。工具参数中的 `confirmed:true` 不能授权。
 

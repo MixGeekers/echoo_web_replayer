@@ -46,6 +46,9 @@ await build({
     "network-events": "src/shared/network-events.ts",
     "mcp-network-query": "src/main/mcp/network-query.ts",
     "export-issues": "src/main/export/issues.ts",
+    "annotation-store": "src/main/storage/annotation-store.ts",
+    annotations: "src/main/annotations.ts",
+    "export-range": "src/main/export/range.ts",
   },
 });
 await build({

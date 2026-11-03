@@ -6,6 +6,7 @@ import type {
   ExportProgress,
   ExportOptions,
 } from "../../shared/contracts/ui";
+import type { ExportRange } from "../../shared/contracts/annotations";
 const phaseLabels: Record<string, string> = {
   selecting: "选择保存位置…", preparing: "准备记录…", prepare: "准备记录…",
   encode: "整理数据", validate: "校验记录", derive: "生成阅读材料",
@@ -25,6 +26,8 @@ interface Options {
     error?: boolean,
     sessionId?: string | null,
   ): void;
+  /** Optional slice chosen in the dialog; undefined exports the whole recording. */
+  range?(): ExportRange | undefined;
 }
 export function createExportUI(api: CollectorAPI, options: Options) {
   async function run<T>(task: () => Promise<T>): Promise<T | undefined> {
@@ -114,6 +117,7 @@ export function createExportUI(api: CollectorAPI, options: Options) {
     event.preventDefault();
     if (!exportSessionId || exporting) return;
     const sessionId = exportSessionId;
+    const range = options.range?.();
     exportOptions = {
       encoding: el("export-mode-full", "input").checked ? "full" : "delta",
       compression: el("export-compression", "input").checked
@@ -130,7 +134,7 @@ export function createExportUI(api: CollectorAPI, options: Options) {
     exportCancelRequested = false;
     updateExportProgress({ sessionId, phase: "selecting" });
     const result = await run(() =>
-      api.exportSession({ sessionId, ...exportOptions }),
+      api.exportSession({ sessionId, ...exportOptions, ...(range ? { range } : {}) }),
     );
     exporting = false;
     el("export-progress", "div").hidden = true;

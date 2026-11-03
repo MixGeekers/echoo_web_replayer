@@ -18,6 +18,10 @@ import { agentReadme } from "./readme";
 import { deriveFiles } from "./derived";
 import { scanTimeline } from "../storage/parser";
 import { makeArchive } from "./zip";
+import { copySlice, resolveRange } from "./range";
+import { annotationMarkdown, annotationReadme } from "./annotation-text";
+import { clipAnnotations } from "../storage/annotation-store";
+import type { ResolvedExportRange } from "../../shared/contracts/annotations";
 const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
 async function hashFile(filename: string, signal?: AbortSignal) {
   const hash = createHash("sha256");
@@ -37,6 +41,7 @@ export async function runPreparedExport({
   appVersion = "0.2.0",
   encoding = "delta",
   compression = "deflate",
+  range: requestedRange,
   signal,
   onProgress,
 }: PreparedExport): Promise<ExportResult> {
@@ -84,14 +89,37 @@ export async function runPreparedExport({
       await fsp.writeFile(path.join(staging, name), value, "utf8");
       return recordFile(name);
     };
+    // A range export reads an unchanged byte slice of the original timeline.
+    let range: ResolvedExportRange | undefined;
+    let source = { timelinePath: capture.timelinePath, byteLength: capture.byteLength };
+    if (requestedRange) {
+      range = await resolveRange({
+        timelinePath: capture.timelinePath,
+        byteLength: capture.byteLength,
+        range: requestedRange,
+        sourceEventCount: metadata.eventCount,
+        sourceLastSeq: metadata.lastSeq,
+        signal,
+      });
+      const slicePath = path.join(staging, ".range-timeline.jsonl");
+      await copySlice(capture.timelinePath, slicePath, range, signal);
+      source = { timelinePath: slicePath, byteLength: range.endByte - range.startByte };
+    }
+    const expected = range
+      ? { eventCount: range.eventCount, lastSeq: range.endSeq, actionCount: range.actionCount, mutationCount: range.mutationCount, snapshotCount: range.snapshotCount }
+      : { eventCount: metadata.eventCount, lastSeq: metadata.lastSeq, actionCount: metadata.actionCount, mutationCount: metadata.mutationCount, snapshotCount: metadata.snapshotCount };
+    const annotations = capture.annotations?.annotations.length
+      ? clipAnnotations(capture.annotations, range ? range.startSeq : 1, expected.lastSeq)
+      : null;
     await writeText("session.json", json(metadata));
     await writeText(
       "AGENT_README.md",
       agentReadme(metadata, capture.capturedAt, appVersion, {
         encoding,
         compression,
-      }),
+      }, annotationReadme(annotations?.annotations ?? [], range)),
     );
+    if (annotations) await writeText("annotations.json", json(annotations));
     await fsp.copyFile(
       path.join(__dirname, "restore.py"),
       path.join(staging, "restore.py"),
@@ -109,6 +137,14 @@ export async function runPreparedExport({
         }),
         { signal },
       );
+      if (range) {
+        // Resources are appended in seq order; keep those captured up to the range end.
+        const resourceFile = path.join(staging, "resources.jsonl");
+        const kept = (await fsp.readFile(resourceFile, "utf8"))
+          .split("\n")
+          .filter((line) => line && Number(parseObject(line).seq) <= range!.endSeq);
+        await fsp.writeFile(resourceFile, kept.map((line) => `${line}\n`).join(""), "utf8");
+      }
       await recordFile("resources.jsonl");
       await fsp.mkdir(path.join(staging, "assets"));
       const seen = new Set();
@@ -127,6 +163,7 @@ export async function runPreparedExport({
             entry.seq > metadata.lastSeq
           )
             throw new Error("资源记录超出导出截点");
+          if (range && entry.seq > range.endSeq) continue;
           if (!entry.sha256 || seen.has(entry.sha256)) continue;
           if (
             typeof entry.sha256 !== "string" ||
@@ -155,8 +192,8 @@ export async function runPreparedExport({
       deltaBlocks: number | undefined;
     if (encoding === "delta") {
       const result = await encodeTimeline({
-        timelinePath: capture.timelinePath,
-        byteLength: capture.byteLength,
+        timelinePath: source.timelinePath,
+        byteLength: source.byteLength,
         dataPath: path.join(staging, "data.bin"),
         indexPath: path.join(staging, "index.jsonl"),
         compression,
@@ -183,10 +220,10 @@ export async function runPreparedExport({
       onProgress?.({
         phase: "validate",
         bytesRead: 0,
-        totalBytes: capture.byteLength,
+        totalBytes: source.byteLength,
       });
-      for await (const { event } of scanTimeline(capture.timelinePath, {
-        byteLength: capture.byteLength,
+      for await (const { event } of scanTimeline(source.timelinePath, {
+        byteLength: source.byteLength,
         signal,
         onProgress: (progress) =>
           onProgress?.({ phase: "validate", ...progress }),
@@ -205,7 +242,7 @@ export async function runPreparedExport({
         actual.snapshotCount += Number(event.type === "dom.snapshot");
       }
       for (const key of Object.keys(actual) as (keyof typeof actual)[])
-        if (actual[key] !== metadata[key])
+        if (actual[key] !== expected[key])
           throw new Error(
             `时间线${key === "eventCount" ? "事件数量" : key}与导出截点不一致`,
           );
@@ -213,12 +250,12 @@ export async function runPreparedExport({
       const timelinePath = path.join(staging, "timeline.jsonl");
       const digest = createHash("sha256");
       let bytes = 0;
-      if (!capture.byteLength) await fsp.writeFile(timelinePath, "");
+      if (!source.byteLength) await fsp.writeFile(timelinePath, "");
       else
         await pipeline(
-          fs.createReadStream(capture.timelinePath, {
+          fs.createReadStream(source.timelinePath, {
             start: 0,
-            end: capture.byteLength - 1,
+            end: source.byteLength - 1,
           }),
           async function* (chunks) {
             for await (const chunk of chunks) {
@@ -228,7 +265,7 @@ export async function runPreparedExport({
               onProgress?.({
                 phase: "encode",
                 bytesRead: bytes,
-                totalBytes: capture.byteLength,
+                totalBytes: source.byteLength,
               });
               yield chunk;
             }
@@ -236,7 +273,7 @@ export async function runPreparedExport({
           fs.createWriteStream(timelinePath, { flags: "wx" }),
           { signal },
         );
-      if (bytes !== capture.byteLength)
+      if (bytes !== source.byteLength)
         throw new Error("时间线在导出截点之前被截断");
       timeline = {
         path: "timeline.jsonl",
@@ -254,6 +291,7 @@ export async function runPreparedExport({
         staging,
         metadata,
         capturedAt: capture.capturedAt,
+        preface: annotationMarkdown(annotations?.annotations ?? [], range),
         signal,
         onFile: (item) =>
           recordFile(item.path, item.bytes !== undefined ? item : undefined),
@@ -268,14 +306,14 @@ export async function runPreparedExport({
         "mutationCount",
         "snapshotCount",
       ] as const) {
-        if (result[key] !== metadata[key])
+        if (result[key] !== expected[key])
           throw new Error(`时间线${key}与导出截点不一致`);
       }
       await snapshotIndex.close();
       snapshotIndex = null;
       await recordFile("snapshots.jsonl");
     }
-    if (eventCount !== metadata.eventCount)
+    if (eventCount !== expected.eventCount)
       throw new Error("时间线事件数量与导出截点不一致，未生成导出包");
     await fileIndex.close();
     fileIndex = null;
@@ -297,20 +335,24 @@ export async function runPreparedExport({
       startedAt: metadata.startedAt,
       status: metadata.status,
       eventCount,
-      actionCount: metadata.actionCount,
-      mutationCount: metadata.mutationCount,
-      snapshotCount: metadata.snapshotCount,
-      lastSeq: metadata.lastSeq,
-      timelineBytes: capture.byteLength,
+      actionCount: expected.actionCount,
+      mutationCount: expected.mutationCount,
+      snapshotCount: expected.snapshotCount,
+      lastSeq: expected.lastSeq,
+      timelineBytes: source.byteLength,
       timeline,
       ordering: "seq (main-process persistence order)",
       redaction: false,
       counts: {
         events: eventCount,
-        actions: metadata.actionCount,
-        mutationBatches: metadata.mutationCount,
-        snapshots: metadata.snapshotCount,
+        actions: expected.actionCount,
+        mutationBatches: expected.mutationCount,
+        snapshots: expected.snapshotCount,
       },
+      ...(annotations
+        ? { annotations: { path: "annotations.json", count: annotations.annotations.length } }
+        : {}),
+      ...(range ? { range } : {}),
       files: entrypoints,
       fileIndex: "files.jsonl",
       checksumAlgorithm: "sha256",
@@ -379,9 +421,11 @@ export async function runPreparedExport({
       encoding,
       compression,
       bytes: archive.bytes,
-      timelineBytes: capture.byteLength,
+      timelineBytes: source.byteLength,
       sha256: timeline.sha256,
       fileCount,
+      ...(range ? { range } : {}),
+      annotationCount: annotations?.annotations.length ?? 0,
       ...(delta ? { blocks: delta.blocks, deltaBlocks } : {}),
     };
   } finally {
