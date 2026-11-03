@@ -1,6 +1,6 @@
 # Agent 本地控制能力
 
-此前的概念草案已由正式本地 MCP 基线替代。当前实现、接入配置、28 项工具、授权和生命周期规则见 [本地 MCP 使用说明](local-mcp.md)。
+此前的概念草案已由正式本地 MCP 基线替代。当前实现、接入配置、29 项工具、授权和生命周期规则见 [本地 MCP 使用说明](local-mcp.md)。
 
 入口：`src/main/mcp/stdio.ts`（官方 MCP SDK / stdio）、`server.ts`（认证本机管道）、`controller.ts`（连接 / 授权 / 租约 / 采集归属）、`tools.ts`（业务工具）、`browser.ts`（网页观察与动作）、`operations.ts`（持久回执与导出任务）。
 

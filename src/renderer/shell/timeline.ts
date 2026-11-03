@@ -10,6 +10,7 @@ import type {
   TimelineQuery,
 } from "../../shared/contracts/ui";
 import type { ReplayPanel } from "../replay-panel";
+import { networkPresentation, isNetworkEvent, networkDetail, NETWORK_DETAIL_BYTES } from "./network-view";
 interface Options {
   sessionId(): string | null;
   selectedSession(): SessionMetadata | null | undefined;
@@ -69,6 +70,8 @@ export function createTimeline(
       "session.resume": ["继续采集", "play", "session"],
       "session.stop": ["结束采集", "stop", "session"],
     };
+    const network = networkPresentation(event);
+    if (network) return network;
     const specific = descriptions[type];
     if (specific) return specific;
     if (type.startsWith("page.")) return ["页面事件", "globe", "page"];
@@ -142,7 +145,7 @@ export function createTimeline(
     events.forEach((event) => {
       const [label, iconName, category] = eventPresentation(event);
       const button = document.createElement("button");
-      button.className = `timeline-event${event.id === selectedEventId ? " selected" : ""}`;
+      button.className = `timeline-event${event.id === selectedEventId ? " selected" : ""}${category.endsWith(" issue") ? " issue" : ""}`;
       button.setAttribute(
         "aria-label",
         `${label} ${formatTime(event.timestamp)} ${escapeText(eventSummary(event))}`,
@@ -338,11 +341,13 @@ export function createTimeline(
         sessionId: required(selectedSessionId),
         eventId,
         preview: true,
-        maxBytes: 100000,
+        maxBytes: isNetworkEvent(event.type) ? NETWORK_DETAIL_BYTES : 100000,
       }),
     );
     if (selectedEventId !== eventId) return;
-    if (full) {
+    const formatted = full && networkDetail(event.type, String(full.preview ?? ""), full.truncated === true);
+    if (formatted) el("detail-json", "pre").textContent = formatted;
+    else if (full) {
       let preview = typeof full.preview === "string" ? full.preview : "";
       if (!full.truncated) {
         try {

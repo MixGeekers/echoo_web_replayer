@@ -3,6 +3,7 @@ import type { JsonToken } from "../storage/tokens";
 import type { SessionMetadata } from "../../shared/contracts/storage";
 import type { FileEntry, ExportSignals } from "../../shared/contracts/export";
 import { errorOf } from "../storage/values";
+import { createIssueCollector } from "./issues";
 type ScalarValue = string | number | boolean | null;
 interface DerivedEvent {
   fields: Record<string, Spool>;
@@ -453,6 +454,7 @@ async function deriveFiles({
     signal,
   );
   const pendingOutputs = new Set([markdown]);
+  const issues = createIssueCollector();
   const counts = {
     eventCount: 0,
     lastSeq: 0,
@@ -596,6 +598,7 @@ async function deriveFiles({
     await markdown.write(
       `| ${values.seq} | ${(Number(values.elapsedMs || 0) / 1000).toFixed(3)}s | ${cell(values.timestamp)} | ${cell(values.type)} | ${cell(summary)} | ${link} |\n`,
     );
+    issues.add(values);
     await disposeEvent();
   }
   try {
@@ -681,6 +684,7 @@ async function deriveFiles({
       ("bytesRead" in input ? input.bytesRead : 0) !== byteLength
     )
       throw new Error("时间线读取不完整");
+    if (issues.total) await markdown.write(issues.markdown());
     await markdown.finish(true);
     pendingOutputs.delete(markdown);
     await reportFile("timeline.md");

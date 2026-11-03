@@ -48,8 +48,10 @@ stdio 进程只向 stdout 输出 MCP 协议，诊断与配对码写入 stderr。
 | --- | --- |
 | 环境与记录库（8） | `state`, `profiles_list`, `profile_manage`, `session_manage`, `library_query`, `library_update`, `library_delete_plan`, `library_delete_apply` |
 | 控制权与网页（10） | `control`, `observe`, `navigate`, `click`, `fill`, `press`, `select`, `scroll`, `wait`, `screenshot` |
-| 采集与证据（7） | `recording_start`, `recording_control`, `recording_rename`, `timeline`, `event`, `recording_inspect`, `replay_seek` |
+| 采集与证据（8） | `recording_start`, `recording_control`, `recording_rename`, `timeline`, `event`, `recording_inspect`, `replay_seek`, `network` |
 | 导出与任务（3） | `export_start`, `operation_get`, `operation_cancel` |
+
+`network` 只读，需要读取权限：按 seq 扫描指定记录的 `network.*` / `console.*` 事件，可按类型（`request`、`response`、`failed`、`message`、`exception` 等）、HTTP 状态区间（`statusMin` / `statusMax`）、URL 子串和控制台 level 过滤，单次最多扫描 1 万条事件，用 `nextAfterSeq` 与 `snapshotSeq` 继续。请求头、响应头和正文用 `event` 读取。
 
 永久删除必须先产生包含隐藏子记录的计划，再由用户在桌面端确认准确范围，最后调用 apply。计划 5 分钟过期；对象或范围变化必须重新预览。工具参数中的 `confirmed:true` 不能授权。
 
