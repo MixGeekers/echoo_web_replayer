@@ -30,6 +30,7 @@ npm run build            # 生成 Windows x64 便携版 EXE
 node scripts/portable-smoke.cjs # 构建后验证单文件启动、录制与重复启动
 node scripts/export-desktop-smoke.cjs # 验证大导出期间暂停、取消和继续录制
 node scripts/large-recording.cjs # 大记录流式导出、恢复及内存验收
+node scripts/feature-network-smoke.cjs # 网络请求、控制台与异常采集、筛选、详情及导出汇总（先 npm run compile）
 ```
 
 便携版输出为 `dist/TraceDock-0.2.0-Windows-x64.exe`；目录版位于 `dist/win-unpacked/`。便携版无需安装，本项目未配置 Windows 代码签名。首次安装依赖和构建可能需要联网下载 Electron 与构建工具。
@@ -83,7 +84,7 @@ Profile（独立登录环境）
 
 右上角「Agent 连接」提供本地 MCP 开关、客户端配置、首次配对、Profile 范围与业务能力授权。常驻协作条显示当前操作者和采集归属；多个客户端可以读取，同一时刻只有一个客户端持有网页控制权。
 
-支持「人操作，Agent 增量分析」与「Agent 操作，同步采集」两条完整流程。人工接管后采集继续；断线或租约到期只暂停仍由该 Agent 负责的采集。重连先读取状态，不自动恢复控制或重复动作。28 项工具复用现有记录库生命周期，并提供需人工确认范围的永久删除、后台导出和可重查的命令回执。
+支持「人操作，Agent 增量分析」与「Agent 操作，同步采集」两条完整流程。人工接管后采集继续；断线或租约到期只暂停仍由该 Agent 负责的采集。重连先读取状态，不自动恢复控制或重复动作。29 项工具复用现有记录库生命周期，并提供需人工确认范围的永久删除、后台导出和可重查的命令回执。
 
 接入步骤、工具清单、错误恢复和当前网页支持范围见 [本地 MCP 使用说明](docs/local-mcp.md)。
 
@@ -96,8 +97,12 @@ Profile（独立登录环境）
 | DOM 快照 | 主文档 HTML、带节点 ID 的树、表单当前值、视口与滚动状态、可访问 iframe 和开放 Shadow DOM 状态 |
 | 静态资源 | 浏览器实际加载的 CSS、图片和字体响应；按 SHA-256 去重保存，保留资源 URL、版本和采集失败原因 |
 | 页面与会话 | 导航、同文档导航、加载生命周期、开始、暂停、恢复、停止、中断及采集错误 |
+| 网络 | XHR、Fetch 与文档请求：`network.request` / `network.response` / `network.failed`，含方法、状态、耗时、请求头与响应头、请求体（256 KiB 上限）和文本类响应正文（JSON / 文本 / XML / HTML / JS，512 KiB 上限）；二进制正文注明跳过原因 |
+| 控制台 | 页面 `console.*` 调用（`console.message`，含级别、文本、来源与调用栈）和未捕获异常 / Promise 拒绝（`console.exception`）；不含 TraceDock 自身隔离脚本 |
 
 DOM 变化约每 150 ms 批量发送，连续滚动按约 150 ms 合并。事件以主进程分配的递增 `seq` 排序；`timestamp` 是来源时间，`elapsedMs` 是接收时相对会话开始的时间，包含暂停时长。`mutationCount` 统计变化批次数，不等于 MutationRecord 条数。
+
+网络与控制台事件通过浏览器调试协议在主进程采集，同样只在录制中记录、按 `requestId` 关联请求与响应。时间线可用「网络」「控制台」筛选，失败请求（HTTP ≥ 400 或网络失败）、控制台错误和页面异常以错误色标出，详情面板展示请求头、响应头与正文。导出的 `timeline.md` 末尾汇总失败请求和页面异常。跨域 iframe 的请求与日志不在范围内。
 
 快照在开始或恢复录制、页面加载、手动抓取和录制结束等节点生成。节点 ID 仅用于对应文档内的关联；不能将它当作跨导航稳定的自动化定位器。
 

@@ -60,3 +60,18 @@ workerCommand({type:'progress', progress:{phase:'archive'}});
 // @ts-expect-error Worker startup data cannot transfer host callbacks through structured clone.
 const invalidWorkerData = {...workerData, onProgress: () => {}} satisfies ExportWorkerData;
 void invalidWorkerData;
+
+import type { ApplicationEventSink } from '../src/shared/contracts/application';
+import type { NetworkResponsePayload, ConsoleMessagePayload } from '../src/shared/contracts/network';
+declare const appSink: ApplicationEventSink;
+declare const networkResponse: NetworkResponsePayload;
+declare const consoleMessage: ConsoleMessagePayload;
+appSink('network.response', networkResponse);
+appSink('console.message', consoleMessage);
+// @ts-expect-error A console message is not a network response.
+appSink('network.response', consoleMessage);
+// @ts-expect-error Console levels are a closed set.
+const invalidLevel: ConsoleMessagePayload = { level: 'fatal', method: 'log', text: '' };
+// @ts-expect-error Optional network fields cannot be explicitly undefined.
+const invalidBody: Pick<NetworkResponsePayload, 'body'> = { body: undefined };
+void invalidLevel; void invalidBody;

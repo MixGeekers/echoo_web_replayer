@@ -42,6 +42,10 @@ await build({
     "delta-codec": "src/main/export/delta-codec.ts",
     "delta-zip": "src/main/export/zip.ts",
     "resource-recorder": "src/main/resources/index.ts",
+    "network-capture": "src/main/network/capture.ts",
+    "network-events": "src/shared/network-events.ts",
+    "mcp-network-query": "src/main/mcp/network-query.ts",
+    "export-issues": "src/main/export/issues.ts",
   },
 });
 await build({

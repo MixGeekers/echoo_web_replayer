@@ -505,3 +505,10 @@ body.mcp-panel-open .timeline-card { display: none; }
   .mcp-target-label { max-width: 260px; }
 }
 @media (prefers-reduced-motion: reduce) { .mcp-entry, .mcp-status-button { transition: none; } }
+/* Network / console timeline events */
+.timeline-filters { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
+.timeline-filters button { white-space: nowrap; }
+.event-icon.network { background: var(--echo-foundation-cyan-50); border-color: var(--echo-foundation-cyan-200); color: var(--echo-foundation-cyan-700); }
+.event-icon.console { background: var(--echo-surface-muted); border-color: var(--echo-border-default); color: var(--echo-text-secondary); }
+.event-icon.issue { background: var(--echo-semantic-danger-background); border-color: var(--el-color-danger-light-7); color: var(--echo-semantic-danger-text); }
+.timeline-event.issue .event-name, .timeline-event.issue .event-summary { color: var(--echo-semantic-danger-text); }

@@ -455,6 +455,20 @@ def md_cell(value):
     return text.replace("|", "\\|").replace("\r", " ").replace("\n", " ").replace("<", "&lt;").replace(">", "&gt;")
 
 
+ISSUE_LIMIT = 200
+ISSUE_STATUS = re.compile(r"^\S+ (\d{3})\b")
+
+
+def is_issue_event(event_type, summary):
+    """Failed requests and uncaught page errors; mirrors src/shared/network-events.ts."""
+    if event_type in ("network.failed", "console.exception"):
+        return True
+    if event_type != "network.response":
+        return False
+    match = ISSUE_STATUS.match(str(summary or ""))
+    return bool(match) and int(match.group(1)) >= 400
+
+
 def derive_snapshot(timeline, target, event, payload_range, report):
     seq = event["seq"]
     stem = f"snapshots/{seq:08d}"
@@ -521,6 +535,7 @@ def derive_snapshot(timeline, target, event, payload_range, report):
 def scan_timeline(timeline, manifest, target, report, derive):
     counts = {"events":0, "actions":0, "mutationBatches":0, "snapshots":0}
     last_seq = 0
+    issues, issue_total = [], 0
     with contextlib.ExitStack() as stack:
         handle = stack.enter_context(timeline.open("rb"))
         raw = stack.enter_context(timeline.open("rb"))
@@ -574,7 +589,15 @@ def scan_timeline(timeline, manifest, target, report, derive):
                 elapsed = event.get("elapsedMs", 0)
                 require(isinstance(elapsed, (int, float)) and not isinstance(elapsed, bool), "Invalid elapsedMs")
                 markdown.write(f'| {seq} | {elapsed / 1000:.3f}s | {md_cell(event.get("timestamp"))} | {md_cell(event["type"])} | {md_cell(event.get("summary", event["type"]))} | {link} |\n')
+                if is_issue_event(event["type"], event.get("summary")):
+                    issue_total += 1
+                    if issue_total <= ISSUE_LIMIT:
+                        issues.append(f'| {seq} | {elapsed / 1000:.3f}s | {md_cell(event["type"])} | {md_cell(str(event.get("summary", ""))[:1024])} |\n')
             require(reader.peek() is None or reader.peek() in b" \t\r\n", "Missing timeline record separator")
+        if markdown and issue_total:
+            more = f"仅列前 {ISSUE_LIMIT} 条，" if issue_total > ISSUE_LIMIT else ""
+            markdown.write(f"\n## 失败请求与页面错误\n\n共 {issue_total} 条：HTTP 状态 ≥ 400 的 network.response、network.failed 与 console.exception。{more}完整内容见 timeline.jsonl 对应 seq。\n\n| 序号 | 相对时间 | 类型 | 摘要 |\n| --- | --- | --- | --- |\n")
+            markdown.writelines(issues)
     require(counts["events"] == manifest["eventCount"] and last_seq == manifest["lastSeq"], "Timeline event count/lastSeq mismatch")
     expected = manifest.get("counts", {})
     for key, value in counts.items():
