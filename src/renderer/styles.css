@@ -409,24 +409,33 @@ body { grid-template-rows: var(--toolbar-height) minmax(0, 1fr); }
   .session-library-notice { padding-top: 18px; padding-bottom: 18px; }
 }
 
-/* The collaboration strip stays separate from connection and capture state. */
-body { grid-template-rows: var(--toolbar-height) 34px minmax(0, 1fr); }
+/* 协作状态并入顶栏：作为紧凑徽标放在 Profile 标签与操作按钮之间，不再单独占一行。
+   顶栏在专注模式下保持可见，所以操作者与采集状态始终一眼可见。 */
 .mcp-entry { gap: 6px; }
 .mcp-entry > i { width: 5px; height: 5px; border-radius: 50%; background: var(--echo-semantic-warning); }
 .mcp-entry[aria-expanded="true"] { color: var(--echo-semantic-brand-text); border-color: var(--echo-semantic-brand-soft); background: var(--echo-semantic-brand-background); }
-.mcp-collaboration { grid-column: 1 / -1; display: flex; align-items: center; gap: 13px; min-width: 0; padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--echo-surface-panel); color: var(--echo-text-muted); font-size: 11px; }
-.mcp-collaboration.agent-controlled { background: var(--echo-semantic-brand-background); }
-.mcp-operator { display: inline-flex; align-items: center; gap: 6px; flex: none; color: var(--echo-text-secondary); }
-.mcp-operator strong { font-size: 11px; font-weight: var(--echo-system-weight-medium); }
+.mcp-collaboration { display: flex; align-items: center; gap: 8px; flex: 0 1 auto; min-width: 0; max-width: 520px; height: 28px; margin-left: 8px; padding: 0 4px 0 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--echo-surface-panel); color: var(--echo-text-muted); font-size: 11px; }
+.mcp-collaboration:not(:has(#mcp-takeover-button:not([hidden]))) { padding-right: 10px; }
+.mcp-collaboration.agent-controlled { border-color: var(--echo-semantic-brand-soft); background: var(--echo-semantic-brand-background); }
+.mcp-operator { display: inline-flex; align-items: center; gap: 5px; flex: none; color: var(--echo-text-secondary); }
+.mcp-operator strong { font-size: 11px; font-weight: var(--echo-system-weight-medium); white-space: nowrap; }
 .mcp-operator svg { width: 13px; height: 13px; }
 .agent-controlled .mcp-operator { color: var(--echo-semantic-brand-text); }
-.mcp-status-button { display: block; max-width: 42%; overflow: hidden; text-overflow: ellipsis; min-width: 0; padding: 0; color: var(--echo-text-muted); font-size: 11px; }
+.mcp-status-button { display: block; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; min-width: 24px; padding: 0 0 0 8px; border-left: 1px solid var(--line); color: var(--echo-text-muted); font-size: 11px; }
 .mcp-status-button:hover { color: var(--echo-semantic-brand-text); }
-.mcp-status-button.has-request { color: var(--echo-semantic-warning-text); }
-.mcp-capture-label { padding-left: 12px; border-left: 1px solid var(--line); color: var(--echo-text-secondary); white-space: nowrap; }
+.mcp-status-button.has-request { color: var(--echo-semantic-warning-text); font-weight: var(--echo-system-weight-medium); }
+.mcp-capture-label { display: inline-flex; align-items: center; gap: 5px; flex: none; height: 20px; padding: 0 8px; border-radius: 999px; background: var(--echo-surface-muted); color: var(--echo-text-secondary); font-weight: var(--echo-system-weight-medium); white-space: nowrap; }
+.mcp-capture-label::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .mcp-capture-label:empty { display: none; }
-.mcp-target-label { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#mcp-takeover-button { height: 25px; padding: 0 10px; font-size: 11px; }
+.capturing .mcp-capture-label { color: var(--echo-semantic-danger-text); background: var(--echo-semantic-danger-background); }
+.capturing .mcp-capture-label::before { background: var(--echo-semantic-danger); animation: blink 1.2s ease-in-out infinite; }
+.capturing.agent-capture .mcp-capture-label { color: var(--echo-semantic-brand-text); background: color-mix(in srgb, var(--echo-semantic-brand) 14%, transparent); }
+.capturing.agent-capture .mcp-capture-label::before { background: var(--echo-semantic-brand); }
+.capture-paused .mcp-capture-label { color: var(--echo-semantic-warning-text); background: var(--echo-semantic-warning-background); }
+.capture-paused .mcp-capture-label::before { background: var(--echo-semantic-warning); }
+.mcp-target-label { flex: 0 1 auto; min-width: 0; max-width: 180px; padding-left: 8px; border-left: 1px solid var(--line); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mcp-target-label:empty { display: none; }
+#mcp-takeover-button { flex: none; height: 22px; padding: 0 10px; border-radius: 999px; font-size: 11px; }
 .mcp-panel { display: flex; flex-direction: column; flex: 0 0 var(--timeline-width); width: var(--timeline-width); min-width: 0; min-height: 0; border-left: 1px solid var(--line); background: var(--echo-surface-panel); }
 body.mcp-panel-open .timeline-card { display: none; }
 .mcp-panel-heading { display: flex; align-items: center; justify-content: space-between; min-height: var(--toolbar-height); flex: none; padding: 0 12px; border-bottom: 1px solid var(--line); }
@@ -499,10 +508,10 @@ body.mcp-panel-open .timeline-card { display: none; }
 .mcp-operation progress { width: 100%; height: 4px; margin-top: 8px; accent-color: var(--echo-semantic-brand); }
 .mcp-delete-plan summary { color: var(--echo-text-secondary); font-size: 11px; cursor: pointer; }
 .mcp-delete-plan ul { margin: 7px 0 12px; padding-left: 16px; font-size: 11px; line-height: 1.7; color: var(--echo-text-secondary); }
+@media (max-width: 1500px) { .mcp-target-label { display: none; } }
 @media (max-width: 1200px) {
   .mcp-entry { padding: 0 7px; }
-  .mcp-collaboration { gap: 10px; }
-  .mcp-target-label { max-width: 260px; }
+  .mcp-collaboration { gap: 6px; max-width: 360px; }
 }
 @media (prefers-reduced-motion: reduce) { .mcp-entry, .mcp-status-button { transition: none; } }
 
