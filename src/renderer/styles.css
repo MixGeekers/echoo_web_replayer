@@ -505,3 +505,10 @@ body.mcp-panel-open .timeline-card { display: none; }
   .mcp-target-label { max-width: 260px; }
 }
 @media (prefers-reduced-motion: reduce) { .mcp-entry, .mcp-status-button { transition: none; } }
+
+/* 专注模式：收起左右侧栏，只保留中央浏览器 / 回放区域。主动打开的 Agent 面板仍可显示。 */
+.focus-mode-button[aria-pressed="true"] { color: var(--echo-semantic-brand-text); background: var(--echo-semantic-brand-background); }
+.focus-mode-button[aria-pressed="true"]:hover:not(:disabled) { color: var(--echo-semantic-brand-text); background: var(--echo-semantic-brand-background); }
+body.focus-mode { grid-template-columns: minmax(0, 1fr); }
+body.focus-mode > .sidebar,
+body.focus-mode .timeline-card { display: none; }
