@@ -39,6 +39,7 @@ await build({
     exporter: "src/main/export/job.ts",
     "export-worker": "src/main/export/worker.ts",
     "export-derived": "src/main/export/derived.ts",
+    codegen: "src/main/codegen/index.ts",
     "delta-codec": "src/main/export/delta-codec.ts",
     "delta-zip": "src/main/export/zip.ts",
     "resource-recorder": "src/main/resources/index.ts",

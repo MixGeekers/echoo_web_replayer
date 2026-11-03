@@ -17,6 +17,7 @@ import type { ExportProgress, ExportResult } from "./export";
 import type { ResourceSummary } from "./resources";
 import type { LibraryBatchInput } from "./library";
 import type { MCPState, MCPCommand, MCPConfig } from "./mcp";
+import type { CodegenLanguage, CodegenResult, CodegenSaveResult } from "./codegen";
 export type { LibraryBatchAction, LibraryBatchInput } from "./library";
 export type {
   SessionMetadata,
@@ -63,6 +64,7 @@ export type EventDetail = DetailPreview | StoredEvent;
 export interface ExportOptions {
   encoding: "delta" | "full";
   compression: "deflate" | "store";
+  script?: boolean;
 }
 export interface CollectorAPI {
   mcpCommand(input: MCPCommand): Promise<AppState>;
@@ -119,6 +121,16 @@ export interface CollectorAPI {
   ): Promise<{ canceled: true } | ({ canceled: false } & ExportResult)>;
   cancelExport(): Promise<{ canceled: boolean }>;
   revealExport(sessionId: string): Promise<void>;
+  generateScript(input: {
+    sessionId: string;
+    language: CodegenLanguage;
+    includeScroll?: boolean;
+  }): Promise<CodegenResult>;
+  saveScript(input: {
+    sessionId: string;
+    language: CodegenLanguage;
+    code: string;
+  }): Promise<CodegenSaveResult>;
   setBrowserBounds(bounds: BrowserBounds): void;
   onState(callback: (state: AppState) => void): () => void;
   onEvent(callback: (event: EventNotice) => void): () => void;

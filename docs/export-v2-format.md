@@ -14,6 +14,10 @@ delta 的物理文件为 `data.bin`、`index.jsonl`、`session.json`、`AGENT_RE
 
 回放资源扩展：新包可额外包含 `resources.jsonl` 和 `assets/<64 位小写 SHA-256>`。资源索引在 `manifest.files` 中列一次，资源内容只逐项列在 `files.jsonl`，避免根清单随资源数增长。资源行记录 `seq`、`elapsedMs`、`url`、`mimeType`、`status`，保存成功时附 `sha256`/`bytes`，失败时附 `error`。资产先落盘，再与时间线中的 `page.resource` 事件和索引串行提交；导出固定索引字节边界且拒绝超出截点的资源事件。相同内容可由多个 URL/版本引用，资源字节不参与时间线的 COPY/ADD 编码。请使用新包随附的还原脚本；旧版严格限制 delta 文件数量的还原器不支持扩展。`--timeline-only` 恢复资源索引但不复制资产到结果目录。
 
+## 可选 Playwright 脚本
+
+导出时勾选「附带 Playwright 脚本」（`ExportOptions.script=true`，默认关闭）会在包根目录增加 `script.spec.ts`：由同一导出截点的时间线操作事件生成的 Playwright Test（TypeScript）草稿，生成时间固定为 `exportedAt`。它与 session.json 等入口文件一样同时列在 `manifest.files` 和 `files.jsonl`（含 bytes/sha256），manifest 另有 `playwrightScript:"script.spec.ts"`；未勾选时这两个字段和文件都不存在，V2 其他结构不变。脚本是派生阅读材料，不参与 COPY/ADD 编码，也不替代 timeline.jsonl。随包 restore.py 在 delta/full 两种模式下校验并把它复制到恢复目录、写入 restored-files.jsonl；旧版还原器不认识这个文件，会按“未知 delta 文件”拒绝。
+
 ## 差分参数和索引
 
 `delta` 对象：`codec:"copy-add-v1"`、`data:"data.bin"`、`index:"index.jsonl"`、`blockBytes:1048576`、`windowBytes:4194304`、`checkpointBlocks:16`、`blocks`。每块原始字节不超过 1 MiB；每 16 块开始独立检查点，窗口只含当前检查点内前序字节最多 4 MiB 的已恢复字节。检查点首块必为 raw，任何跨检查点引用都非法。

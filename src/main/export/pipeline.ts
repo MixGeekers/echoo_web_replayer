@@ -18,6 +18,7 @@ import { agentReadme } from "./readme";
 import { deriveFiles } from "./derived";
 import { scanTimeline } from "../storage/parser";
 import { makeArchive } from "./zip";
+import { generateFromTimeline } from "../codegen";
 const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
 async function hashFile(filename: string, signal?: AbortSignal) {
   const hash = createHash("sha256");
@@ -37,6 +38,7 @@ export async function runPreparedExport({
   appVersion = "0.2.0",
   encoding = "delta",
   compression = "deflate",
+  script = false,
   signal,
   onProgress,
 }: PreparedExport): Promise<ExportResult> {
@@ -90,6 +92,7 @@ export async function runPreparedExport({
       agentReadme(metadata, capture.capturedAt, appVersion, {
         encoding,
         compression,
+        script,
       }),
     );
     await fsp.copyFile(
@@ -97,6 +100,15 @@ export async function runPreparedExport({
       path.join(staging, "restore.py"),
     );
     await recordFile("restore.py");
+    if (script) {
+      // Derived from the same immutable byte boundary; DOM lines are skipped unparsed.
+      onProgress?.({ phase: "script", bytesRead: 0, totalBytes: capture.byteLength });
+      const generated = await generateFromTimeline(
+        { metadata, timelinePath: capture.timelinePath, byteLength: capture.byteLength },
+        { language: "typescript", generatedAt: capture.capturedAt, signal },
+      );
+      await writeText("script.spec.ts", generated.code);
+    }
     if (capture.resourceBytes) {
       if (!capture.resourcePath) throw new Error("资源截点缺少索引路径");
       await pipeline(
@@ -315,6 +327,7 @@ export async function runPreparedExport({
       fileIndex: "files.jsonl",
       checksumAlgorithm: "sha256",
       checksumExcludes: ["manifest.json"],
+      ...(script ? { playwrightScript: "script.spec.ts" } : {}),
       ...(encoding === "delta"
         ? { delta, derived: ["timeline.md", "snapshots/", "snapshots.jsonl"] }
         : { snapshotIndex: "snapshots.jsonl" }),

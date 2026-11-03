@@ -70,6 +70,8 @@ const api: CollectorAPI = {
   exportSession: (input) => invoke("exportSession", input),
   cancelExport: () => invoke("cancelExport"),
   revealExport: (input) => invoke("revealExport", input),
+  generateScript: (input) => invoke("generateScript", input),
+  saveScript: (input) => invoke("saveScript", input),
   setBrowserBounds: (bounds) =>
     ipcRenderer.send("collector:setBrowserBounds", bounds),
   onState: (callback) => subscribe("collector:state", callback),

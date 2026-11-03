@@ -48,8 +48,10 @@ stdio 进程只向 stdout 输出 MCP 协议，诊断与配对码写入 stderr。
 | --- | --- |
 | 环境与记录库（8） | `state`, `profiles_list`, `profile_manage`, `session_manage`, `library_query`, `library_update`, `library_delete_plan`, `library_delete_apply` |
 | 控制权与网页（10） | `control`, `observe`, `navigate`, `click`, `fill`, `press`, `select`, `scroll`, `wait`, `screenshot` |
-| 采集与证据（7） | `recording_start`, `recording_control`, `recording_rename`, `timeline`, `event`, `recording_inspect`, `replay_seek` |
+| 采集与证据（8） | `recording_start`, `recording_control`, `recording_rename`, `timeline`, `event`, `recording_inspect`, `replay_seek`, `codegen` |
 | 导出与任务（3） | `export_start`, `operation_get`, `operation_cancel` |
+
+`tracedock_codegen({recordingId, language?, maxBytes?})` 只读，需要该记录所属 Profile 的读取授权；按调用时的时间线截点生成 Playwright Test（`typescript`，默认）或 pytest-playwright（`python`）脚本草稿，返回 `code`、`filename`、`stats`（步骤、TODO、省略的焦点/滚动/字符按键数）和 `warnings`。每步带 `// seq N` 注释，可用 `event` 回查原始事件。`maxBytes` 默认 256 KiB、最高 1 MiB，超出返回 `RESULT_TOO_LARGE`。脚本未经执行验证，运行前应结合 `timeline` / `observe` 复核定位器和等待条件。
 
 永久删除必须先产生包含隐藏子记录的计划，再由用户在桌面端确认准确范围，最后调用 apply。计划 5 分钟过期；对象或范围变化必须重新预览。工具参数中的 `confirmed:true` 不能授权。
 

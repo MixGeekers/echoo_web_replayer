@@ -4,6 +4,8 @@ export type ExportCompression = "deflate" | "store";
 export interface ExportOptions {
   encoding?: ExportEncoding | undefined;
   compression?: ExportCompression | undefined;
+  /** Add a generated Playwright Test script (script.spec.ts) to the package. */
+  script?: boolean | undefined;
 }
 export interface ExportProgress {
   phase: string;

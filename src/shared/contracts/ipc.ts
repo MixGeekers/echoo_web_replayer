@@ -50,7 +50,9 @@ export type InvokeChannel =
   | "snapshot"
   | "exportSession"
   | "cancelExport"
-  | "revealExport";
+  | "revealExport"
+  | "generateScript"
+  | "saveScript";
 export type InvokeArgs<K extends InvokeChannel> = Parameters<CollectorAPI[K]>;
 export type InvokeResult<K extends InvokeChannel> = Awaited<
   ReturnType<CollectorAPI[K]>

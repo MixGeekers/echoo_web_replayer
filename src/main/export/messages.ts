@@ -16,6 +16,10 @@ function number(value: unknown): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw new Error('导出消息计数必须为非负安全整数');
   return value;
 }
+function boolean(value: unknown): boolean {
+  if (typeof value !== 'boolean') throw new Error('导出消息字段必须为布尔值');
+  return value;
+}
 const optionalString = (value: unknown) => value === undefined ? undefined : string(value);
 const optionalNumber = (value: unknown) => value === undefined ? undefined : number(value);
 function encoding(value: unknown): ExportEncoding {
@@ -43,6 +47,7 @@ export function readWorkerData(value: unknown): ExportWorkerData {
     sessionId, destination: string(raw.destination), appVersion: optionalString(raw.appVersion),
     encoding: raw.encoding === undefined ? undefined : encoding(raw.encoding),
     compression: raw.compression === undefined ? undefined : compression(raw.compression),
+    script: raw.script === undefined ? undefined : boolean(raw.script),
   };
 }
 export function readWorkerCommand(value: unknown): ExportWorkerCommand {

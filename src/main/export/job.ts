@@ -28,6 +28,7 @@ export async function exportSession({
   appVersion = "0.2.0",
   encoding = "delta",
   compression = "deflate",
+  script = false,
   signal,
   onProgress,
 }: PreparedExportOptions): Promise<ExportResult> {
@@ -56,6 +57,7 @@ export async function exportSession({
         appVersion,
         encoding,
         compression,
+        script,
       },
     });
     let settled = false;

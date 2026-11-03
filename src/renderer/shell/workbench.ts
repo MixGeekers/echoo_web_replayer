@@ -2,6 +2,7 @@ import { createLifecycleUI } from "./lifecycle";
 import { createTimeline } from "./timeline";
 import { createExportUI } from "./export";
 import { createMCPUI } from "./mcp";
+import { createCodegenUI } from "./codegen";
 import { formatDate, count, statusName } from "./format";
 import { element as el, required, message } from "./dom";
 import { svg } from "./icons";
@@ -85,6 +86,13 @@ export function startWorkbench(): void {
     repaint: renderState,
     closeReplay: () => replay.close(),
     replaySessionId: () => replay.sessionId,
+    showDialog,
+    closeDialog,
+    notify,
+  });
+  const codegenUI = createCodegenUI(api, {
+    sessionId: () => selectedSession() && lifecycle.effectiveState(selectedSession()!) === "trashed" ? null : selectedSessionId,
+    selectedSession,
     showDialog,
     closeDialog,
     notify,
@@ -332,6 +340,7 @@ export function startWorkbench(): void {
       `结束：${state.session?.name || "当前会话"}`;
     el("export-button", "button").disabled = !session || lifecycle.effectiveState(session) === "trashed" || exportUI.busy || busy;
     el("replay-button", "button").disabled = !session?.snapshotCount || lifecycle.effectiveState(session) === "trashed" || busy;
+    codegenUI.render(busy);
     el("export-button", "button").title = session
       ? `导出所选采集记录：${session.name}`
       : "先选择一条采集记录";

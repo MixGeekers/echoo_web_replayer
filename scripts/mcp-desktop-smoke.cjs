@@ -157,9 +157,9 @@ async function run() {
     assert.match(await ui.locator('#mcp-config').inputValue(),/mcpServers/);
     await ui.locator('#mcp-setup > summary').click();
   });
-  await step('MCP handshake exposes 28 tools but no business data before real UI grants scope',async()=>{
+  await step('MCP handshake exposes 29 tools but no business data before real UI grants scope',async()=>{
     alpha=await connect('analysis-alpha','分析 Agent');
-    assert.equal((await alpha.listTools()).tools.length,28);
+    assert.equal((await alpha.listTools()).tools.length,29);
     await denied(alpha,'state',{},'AUTH_REQUIRED');
     await grant('analysis-alpha');
     const current=await tool(alpha,'state');assert.equal(current.activeProfileId,profileA);

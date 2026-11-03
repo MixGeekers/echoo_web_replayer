@@ -1,0 +1,22 @@
+/* 「生成脚本」: Playwright script viewer. Uses the shared Echoo tokens only. */
+.codegen-open { color: var(--echo-text-secondary); }
+.codegen-dialog { width: min(760px, calc(100vw - 48px)); max-height: calc(100vh - 48px); display: none; flex-direction: column; }
+.codegen-dialog[open] { display: flex; }
+.codegen-dialog h2 { margin-bottom: 4px; }
+.codegen-dialog .export-session-name { margin-bottom: 12px; }
+.codegen-toolbar { display: flex; align-items: center; gap: 12px; flex: none; margin-bottom: 8px; }
+.codegen-language { display: inline-flex; flex: none; padding: 2px; border: 1px solid var(--echo-border-default); border-radius: var(--echo-radius-xs); background: var(--echo-surface-muted); }
+.codegen-language button { height: 24px; padding: 0 10px; border-radius: 3px; color: var(--echo-text-secondary); font-size: var(--echo-system-font-xs); font-weight: var(--echo-system-weight-medium); }
+.codegen-language button.selected { background: var(--echo-surface-panel); color: var(--echo-semantic-brand-text); box-shadow: var(--echo-shadow-sm); }
+.codegen-dialog label.codegen-option { display: inline-flex; align-items: center; gap: 6px; flex: none; margin: 0; font-size: var(--echo-system-font-xs); cursor: pointer; }
+.codegen-dialog .codegen-option input { width: 14px; height: 14px; margin: 0; padding: 0; accent-color: var(--echo-semantic-brand); }
+.codegen-stats { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--echo-text-muted); font: 10px var(--echo-system-font-mono); }
+.codegen-code { flex: 1 1 auto; min-height: 220px; max-height: 56vh; margin: 0; padding: 10px 12px; overflow: auto; border: 1px solid var(--echo-border-default); border-radius: var(--echo-radius-xs); background: var(--echo-surface-muted); color: var(--echo-text-primary); font: 11px/1.65 var(--echo-system-font-mono); white-space: pre; tab-size: 2; scrollbar-width: thin; scrollbar-color: var(--echo-sidebar-scrollbar-thumb) transparent; }
+.codegen-line.comment { color: var(--echo-text-muted); }
+.codegen-line.seq { color: var(--echo-semantic-brand-text); }
+.codegen-line.todo { color: var(--echo-semantic-warning-text); }
+.codegen-dialog .export-note { margin-top: 8px; }
+.codegen-dialog .dialog-actions { margin-top: 14px; }
+.codegen-dialog .dialog-actions .button { display: inline-flex; align-items: center; gap: 5px; }
+.export-dialog .export-script { margin-top: 8px; }
+.export-dialog .export-script small { margin-left: auto; color: var(--echo-text-muted); font: 10px var(--echo-system-font-mono); }

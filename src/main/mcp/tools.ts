@@ -6,6 +6,7 @@ import type { Workspace } from "../workspace";
 import type { LibraryBatchInput, LibraryBatchAction } from "../../shared/contracts/library";
 import { planLibraryBatch } from "../library-batch";
 import { createMCPOperations, MCPToolError, payloadHash, toolError } from "./operations";
+import { generateRecordingScript } from "../codegen";
 
 export type MCPCapability = "read" | "capture" | "organize" | "export" | "browser";
 export interface MCPAccess {
@@ -68,6 +69,7 @@ const definitions:Array<[string,string,Record<string,Schema>,string[],boolean,bo
   ["event","Read a single event with bounded detail. Cite recordingId and seq in analysis. Truncated data is explicitly marked.",{recordingId:id,eventId:id,maxBytes:num(262144,1024)},["recordingId","eventId"],true],
   ["recording_inspect","Inspect recording metadata, coverage or resource availability; missing capture data is not evidence that no action occurred.",{recordingId:id,section:choice("metadata","coverage","resources")},["recordingId"],true],
   ["replay_seek","Read a replay baseline and changes without replaying actions on the live website or taking over the user's player.",{recordingId:id,seq:num(),timeMs:num(),endSeq:num(),maxBytes:num(262144,1024)},["recordingId"],true],
+  ["codegen","Generate a Playwright Test (TypeScript) or pytest-playwright (Python) script draft from a recording's action timeline. Read-only; each step carries a // seq comment, unsupported gaps become TODO comments. Review locators and waits before running.",{recordingId:id,language:choice("typescript","python"),maxBytes:num(1048576,1024)},["recordingId"],true],
   ["export_start","Start a durable background ZIP export into the approved local exports directory. Returns operationId immediately; disconnect does not cancel. filename must be a plain new ZIP filename.",{recordingId:id,filename:str("New .zip filename without directories",160),encoding:choice("delta","full"),compression:choice("deflate","store"),...commonWrite},["recordingId","commandId"],false],
   ["operation_get","Read a retained command or export result, including final path/size/SHA-256, across reconnects. Inspect unknown actions before deciding whether to retry.",{operationId:id,commandId:command,waitMs:num(5000)},[],true],
   ["operation_cancel","Cancel an owned export operation. A completed export stays completed; late cancellation never removes committed files.",{operationId:id,...commonWrite},["operationId","commandId"],false],
@@ -214,6 +216,7 @@ export async function createMCPTools({workspace:ws,access,browser,dataRoot}:{wor
         return {recording:withRevision(ws.store.getSession(record.id))};
       });
     }
+    if(nameShort==="codegen") {const r=recording(connectionId,text(q,"recordingId"));ws.readable(r.id);const result=await ws.readRecording(r.id,()=>generateRecordingScript(ws.store,r.id,{language:q.language==="python"?"python":"typescript"}));return bounded({recordingId:r.id,...result},number(q,"maxBytes")??262144);}
     if(["timeline","event","recording_inspect","replay_seek"].includes(nameShort)) {
       const r=recording(connectionId,text(q,"recordingId"));ws.readable(r.id);const maxBytes=number(q,"maxBytes")??65536;
       if(nameShort==="recording_inspect"){if(!q.section||q.section==="metadata")return {recording:withRevision(r)};return ws.resourceSummary(r.id);}
