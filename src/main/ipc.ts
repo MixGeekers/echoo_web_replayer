@@ -14,6 +14,7 @@ import { parseLibraryBatch } from "./library-batch";
 import type { MCPController } from "./mcp/controller";
 import type { MCPCommand, MCPConfig } from "../shared/contracts/mcp";
 import { installAnnotationIPC, parseExportRange } from "./annotations-ipc";
+import { generateForUI, parseGenerateRequest, saveScriptFromUI } from "./codegen/ipc";
 const string = (value: unknown): string => {
   if (typeof value !== "string") throw new Error("参数必须为字符串");
   return value;
@@ -168,11 +169,14 @@ export function installIPC({win,workspace,demoURL,mcp,mcpConfig}: Options) {
       (compression !== "deflate" && compression !== "store")
     )
       throw new Error("无效的导出选项");
+    if (q.script !== undefined && typeof q.script !== "boolean")
+      throw new Error("无效的导出选项");
     return command(() => {readable(string(q.sessionId));return {result: jobs.startExport({
       sessionId: string(q.sessionId),
       encoding,
       compression,
       range: parseExportRange(q.range),
+      script: q.script === true,
     })};}).then(value => value.result);
   });
   handle("cancelExport", jobs.cancel);
@@ -182,6 +186,14 @@ export function installIPC({win,workspace,demoURL,mcp,mcpConfig}: Options) {
     shell.showItemInFolder(session.lastExportPath);
   });
   installAnnotationIPC(win, workspace, handle);
+  handle("generateScript", (input) => {
+    const { sessionId } = parseGenerateRequest(input);
+    readable(sessionId);
+    return readRecording(sessionId, () => generateForUI(store, input));
+  });
+  handle("saveScript", (input) =>
+    saveScriptFromUI(win, input, (id) => store.getSession(id).name),
+  );
   ipcMain.on("collector:setBrowserBounds", (event, value: unknown) => {
     try {
       shellCaller(event);

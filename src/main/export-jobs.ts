@@ -46,7 +46,7 @@ export function createExportJobs(
     job: ExportJob,
     destination?: string,
   ): Promise<ExportOutcome> {
-    const { sessionId, encoding, compression, range } = input;
+    const { sessionId, encoding, compression, range, script } = input;
     const selected = store.getSession(sessionId);
     if (selected.libraryState === "trashed") throw new Error("请先从回收站恢复会话");
     const result = destination ? {canceled: false, filePath: destination} : await dialog.showSaveDialog(win, {
@@ -84,6 +84,7 @@ export function createExportJobs(
       encoding,
       compression,
       range,
+      script,
       signal: job.controller.signal,
       onProgress: (progress) => {
         const now = Date.now();

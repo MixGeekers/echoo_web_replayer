@@ -53,6 +53,11 @@ node scripts/feature-annotations-smoke.cjs # 书签、标注、书签列表、�
 地址栏提供后退、前进、刷新和返回演示页。网页请求打开新窗口时，会在当前内嵌浏览器中加载。
 
 如果网页脚本关闭了内嵌浏览窗口，工作台会结束并保存当前采集，在时间线标记可能缺失的结束快照，并重新打开同一 Profile 的演示页。原有登录环境与采集记录保留，可重新输入网址、开始新采集；不会自动重放关闭前的网址或表单请求。
+### 生成 Playwright 脚本
+
+选中采集记录后点击右侧「生成脚本」，查看由时间线操作事件推断的 Playwright Test（TypeScript）脚本，可切换为 pytest-playwright（Python），支持「复制」和「保存为文件」。首步打开起始地址；定位器按 `getByTestId` > `getByRole`（名称）> `getByLabel` > `getByPlaceholder` > `#id` > 文本 > CSS 选择；连续输入合并为最终值的 `fill`，下拉框、复选框和单选框分别生成 `selectOption`、`check/uncheck`；与已输入内容重复的字符按键、由点击或回车触发的提交不重复生成；操作引起的导航生成 `toHaveURL` 断言，地址栏跳转生成 `goto`。同源 iframe 使用 `frameLocator`，开放 Shadow DOM 以宿主元素限定范围。滚动与焦点默认省略，可勾选「包含滚动」。每步带 `// seq N` 注释对应时间线，暂停、采集错误、无法定位的目标和文件上传以 TODO 注释标出。生成流式读取时间线，跳过 DOM 快照与变化行，不整体载入大记录。
+
+脚本是推断出的草稿，没有自动执行；定位器取自录制时的候选项，可能不唯一或随页面版本失效，并保留录制时的原始输入值（包括密码）。导出时可勾选「附带 Playwright 脚本」把 `script.spec.ts` 放进 ZIP；MCP 客户端可调用只读工具 `tracedock_codegen` 获取同样的脚本。验收：`xvfb-run -a node scripts/feature-codegen-smoke.cjs`（录制演示页、生成/复制/保存/导出，并用 Chromium 实际运行生成的脚本）。
 
 ## Profile、Session 与采集记录生命周期（新基线）
 
@@ -88,7 +93,7 @@ Profile（独立登录环境）
 
 右上角「Agent 连接」提供本地 MCP 开关、客户端配置、首次配对、Profile 范围与业务能力授权。常驻协作条显示当前操作者和采集归属；多个客户端可以读取，同一时刻只有一个客户端持有网页控制权。
 
-支持「人操作，Agent 增量分析」与「Agent 操作，同步采集」两条完整流程。人工接管后采集继续；断线或租约到期只暂停仍由该 Agent 负责的采集。重连先读取状态，不自动恢复控制或重复动作。31 项工具复用现有记录库生命周期，并提供需人工确认范围的永久删除、后台导出和可重查的命令回执。
+支持「人操作，Agent 增量分析」与「Agent 操作，同步采集」两条完整流程。人工接管后采集继续；断线或租约到期只暂停仍由该 Agent 负责的采集。重连先读取状态，不自动恢复控制或重复动作。32 项工具复用现有记录库生命周期，并提供需人工确认范围的永久删除、后台导出和可重查的命令回执。
 
 接入步骤、工具清单、错误恢复和当前网页支持范围见 [本地 MCP 使用说明](docs/local-mcp.md)。
 
@@ -148,7 +153,7 @@ TraceDock-<session-id>.zip       默认差分包
 └── data.bin                     基线、COPY/ADD 差分与新增原始字节
 ```
 
-包含静态资源的新录制还附带 `resources.jsonl` 和 `assets/`，也列入 `files.jsonl` 校验清单。
+包含静态资源的新录制还附带 `resources.jsonl` 和 `assets/`，也列入 `files.jsonl` 校验清单。勾选「附带 Playwright 脚本」时另含 `script.spec.ts`，同样列入校验清单并由 `restore.py` 复制到恢复目录。
 
 先从 ZIP 解出 `restore.py`，用 Python 3.10 或更高版本运行，无需安装第三方包或联网：
 
@@ -196,7 +201,7 @@ npm start
 - DOM 记录不等于像素回放：Canvas / WebGL、视频帧、浏览器原生界面、样式计算、伪元素和 JavaScript 内存状态不在完整采集范围内。批次中的增删子树在观察器回调时读取，不保证保留每个中间瞬间。
 - 存储读取、导出和恢复采用有界处理；浏览器采集器生成单次快照时仍需构建完整 DOM 对象，单次快照采集的内存开销不等于导出/恢复的内存上限。
 - 保存已加载的 CSS、图片和字体，不录制完整网络流量、API 响应体、下载文件或屏幕视频；不导出 Cookie、localStorage 或浏览器配置备份。
-- 本版提供采集画面回放和分析材料，不自动调用 Agent，也不自动生成并执行操作重跑脚本。自动化方案仍需基于分析结果实现和验证。
+- 本版提供采集画面回放、分析材料和 Playwright 脚本草稿，不自动调用 Agent，也不自动执行生成的脚本。自动化方案仍需基于分析结果和脚本草稿验证。
 - 数据脱敏明确不属于 V1。
 
 ## 代码结构
@@ -210,6 +215,7 @@ src/main/export-jobs.ts    导出对话框、截点及任务管理
 src/main/storage/          会话写入、磁盘索引、流式解析与查询
 src/main/resources/        资源采集、目录查询和离线协议
 src/main/export/           Worker、导出流水线、差分和 ZIP64
+src/main/codegen/          Playwright 脚本生成（纯生成器、流式时间线读取、IPC）
 src/preload/               两个沙箱入口，分别构建成单文件 CJS
 src/recorder/              节点、快照、操作、DOM 变化和观察生命周期
 src/replay/                独立回放调度、数据校验和 DOM 重建

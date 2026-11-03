@@ -76,6 +76,8 @@ const api: CollectorAPI = {
   deleteAnnotation: (input) => invoke("deleteAnnotation", input),
   markAnnotation: (input) => invoke("markAnnotation", input),
   onAnnotations: (callback) => subscribe("collector:annotations", callback),
+  generateScript: (input) => invoke("generateScript", input),
+  saveScript: (input) => invoke("saveScript", input),
   setBrowserBounds: (bounds) =>
     ipcRenderer.send("collector:setBrowserBounds", bounds),
   onState: (callback) => subscribe("collector:state", callback),

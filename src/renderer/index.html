@@ -7,6 +7,7 @@
   <title>TraceDock · 录制与回放</title>
   <link rel="stylesheet" href="../shared/echoo-theme-tokens.css">
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="codegen.css">
 </head>
 <body>
   <header class="workspace-header">
@@ -143,6 +144,7 @@
         </div>
         <div id="recording-overview" class="session-overview">
           <button id="replay-button" class="button replay-open" disabled><span data-icon="play"></span>回放</button>
+          <button id="codegen-button" class="button replay-open codegen-open" type="button" disabled><span data-icon="code"></span>生成脚本</button>
           <strong id="current-session-name">未开始采集</strong>
           <span id="current-session-subtitle"></span>
           <span id="current-session-profile"></span>
@@ -313,12 +315,30 @@
         <label><input type="radio" name="export-encoding" value="full" id="export-mode-full"><span><strong>完整导出</strong><small>解压后直接读取完整时间线和快照</small></span></label>
       </fieldset>
       <label class="export-compression"><input type="checkbox" id="export-compression" checked>压缩 ZIP</label>
+      <label class="export-compression export-script"><input type="checkbox" id="export-script">附带 Playwright 脚本<small>script.spec.ts</small></label>
       <p class="export-note">随包附带 restore.py 和 Agent 说明。导出期间可继续采集。</p>
       <div class="dialog-actions">
         <button type="button" id="cancel-export-dialog-button" class="button">取消</button>
         <button type="submit" id="export-confirm-button" class="button primary">选择保存位置</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog id="codegen-dialog" class="dialog codegen-dialog" aria-labelledby="codegen-dialog-title">
+    <div class="help-top"><h2 id="codegen-dialog-title">生成 Playwright 脚本</h2><button id="close-codegen-dialog" class="icon-button" type="button" aria-label="关闭脚本" data-icon="close"></button></div>
+    <p id="codegen-session-name" class="export-session-name"></p>
+    <div class="codegen-toolbar">
+      <div class="codegen-language" role="group" aria-label="脚本语言"><button type="button" data-language="typescript" class="selected" aria-pressed="true">TypeScript</button><button type="button" data-language="python" aria-pressed="false">Python</button></div>
+      <label class="codegen-option"><input type="checkbox" id="codegen-scroll">包含滚动</label>
+      <span id="codegen-stats" class="codegen-stats"></span>
+    </div>
+    <pre id="codegen-code" class="codegen-code" tabindex="0" aria-label="生成的脚本"></pre>
+    <p id="codegen-note" class="export-note"></p>
+    <div class="dialog-actions">
+      <button type="button" id="codegen-done" class="button">关闭</button>
+      <button type="button" id="codegen-copy" class="button" disabled><span data-icon="document"></span>复制</button>
+      <button type="button" id="codegen-save" class="button primary" disabled><span data-icon="download"></span>保存为文件</button>
+    </div>
   </dialog>
 
   <dialog id="help-dialog" class="dialog help-dialog">

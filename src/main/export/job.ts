@@ -30,6 +30,7 @@ export async function exportSession({
   encoding = "delta",
   compression = "deflate",
   range,
+  script = false,
   signal,
   onProgress,
 }: PreparedExportOptions): Promise<ExportResult> {
@@ -67,6 +68,7 @@ export async function exportSession({
         encoding,
         compression,
         range,
+        script,
       },
     });
     let settled = false;

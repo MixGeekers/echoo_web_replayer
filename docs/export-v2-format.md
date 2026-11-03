@@ -19,6 +19,9 @@ delta 的物理文件为 `data.bin`、`index.jsonl`、`session.json`、`AGENT_RE
 **annotations.json**：记录有书签或注释时，包内附带 `annotations.json`，在 `manifest.files` 与 `files.jsonl` 中各列一次并校验 SHA-256；manifest 另有 `annotations:{path:"annotations.json",count}`。没有标注时不生成该文件，也没有该字段。文件为 `{format:"tracedock-annotations",schemaVersion:1,recordingId,revision,annotations:[...]}`，每项含 `id`（`annotation-<uuid>`）、`seq`、`endSeq`（null 或不小于 seq 的包含式结束序号）、`text`、`author`（`user`/`agent`）、`createdAt`、`updatedAt`、`elapsedMs`、`timestamp`、`eventType`。标注是采集记录目录中的独立元数据，不写入时间线；导出时只保留锚点位于导出事件范围内的项，`endSeq` 截到范围末尾。restore.py 校验格式、ID、作者、序号范围及 manifest 计数，在 delta/full 和 `--timeline-only` 下都复制该文件并写入 restored-files.jsonl；派生 `timeline.md` 顶部列出“人工标注”。AGENT_README.md 在恢复说明之前列出“人工标注（优先阅读）”。
 
 **range**：片段导出的 manifest 增加 `range` 对象：`requestedStartSeq`、`requestedEndSeq`、`startSeq`、`endSeq`、`baselineSnapshotSeq`（无更早快照时为 null，从第一条事件开始）、`startByte`/`endByte`（原 timeline.jsonl 的字节区间）、`startElapsedMs`/`endElapsedMs`、`sourceEventCount`/`sourceLastSeq`/`sourceTimelineBytes`，以及片段内 `eventCount`/`actionCount`/`mutationCount`/`snapshotCount`。片段从请求起点处或之前最近的 `dom.snapshot` 开始，到请求终点为止；timeline.jsonl 是原文件的连续字节区间，每行逐字节一致。根字段 `eventCount`、`lastSeq`、`timelineBytes`、`timeline`、`counts` 描述片段本身；`session.json` 仍是整条记录在截点的元数据。resources.jsonl 只保留 `seq <= range.endSeq` 的行及其资产。差分编码作用于片段字节，检查点和窗口规则不变。restore.py 校验首条与末条 seq、事件数与 `range` 一致。按时间请求（startMs/endMs，基于 elapsedMs）解析为同样的 seq 字段。
+## 可选 Playwright 脚本
+
+导出时勾选「附带 Playwright 脚本」（`ExportOptions.script=true`，默认关闭）会在包根目录增加 `script.spec.ts`：由同一导出截点的时间线操作事件生成的 Playwright Test（TypeScript）草稿，生成时间固定为 `exportedAt`。它与 session.json 等入口文件一样同时列在 `manifest.files` 和 `files.jsonl`（含 bytes/sha256），manifest 另有 `playwrightScript:"script.spec.ts"`；未勾选时这两个字段和文件都不存在，V2 其他结构不变。脚本是派生阅读材料，不参与 COPY/ADD 编码，也不替代 timeline.jsonl。随包 restore.py 在 delta/full 两种模式下校验并把它复制到恢复目录、写入 restored-files.jsonl；旧版还原器不认识这个文件，会按“未知 delta 文件”拒绝。
 
 ## 差分参数和索引
 

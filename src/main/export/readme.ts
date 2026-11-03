@@ -11,7 +11,7 @@ export function agentReadme(
   metadata: SessionMetadata,
   capturedAt: string,
   appVersion: string,
-  { encoding = "delta", compression = "deflate" }: ExportOptions = {},
+  { encoding = "delta", compression = "deflate", script = false }: ExportOptions = {},
   /** Optional sections placed before the restore steps (annotations, range). */
   preface = "",
 ) {
@@ -103,5 +103,9 @@ Python 3.10+，只使用标准库，无需安装依赖或联网；将 recording.
 新录制可包含 resources.jsonl 和 assets/<sha256>，保存实际加载的 CSS、图片和字体响应；完整/差分包均校验并恢复它们。资源索引包含 URL、MIME、SHA-256、字节数、关联 seq 和失败原因。此包不是完整网络 HAR、视频或浏览器配置备份；network.* 只覆盖 XHR / Fetch / 文档请求且正文有上限，不能假设包含未列出的资源、API 响应、下载内容、Cookie、localStorage 或截图。CSS 动画、CSSOM 修改和 JS 内存状态也无法从 DOM 变化完整重建。连续滚动会节流合并；DOM 变化会批处理。导航和浏览器崩溃可能造成最后尚未送达的事件不可恢复，若发生恢复以 session.interrupted / coverage / 错误事件为依据。
 
 本次导出以读取到的时间线字节边界为准；导出过程中后来产生的事件不包含在这个包内。原始 JSONL 是事实来源，Markdown 是索引。数据脱敏、自动生成并执行回放、跨站稳定性保证不属于 V1。
-`;
+${script ? `
+## 附带的 Playwright 脚本
+
+\`script.spec.ts\` 是 TraceDock 按同一截点从时间线操作事件推断生成的 Playwright Test（TypeScript）草稿，已列入 files.jsonl 校验，restore.py 会把它复制到恢复目录。每个步骤上方的 \`// seq N\` 对应 timeline.jsonl 的事件序号；连续输入合并为一次 fill，滚动和焦点默认省略，暂停、采集错误和无法定位的目标以 TODO 注释标出。它是派生材料而非事实来源：定位器取自录制时的候选项，可能不唯一或随页面版本失效；脚本没有执行验证，请结合 timeline.jsonl 与快照复核后再运行（\`npx playwright test script.spec.ts\`）。脚本保留录制时的原始输入值。
+` : ""}`;
 }

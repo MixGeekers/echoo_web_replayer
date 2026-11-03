@@ -7,6 +7,8 @@ export interface ExportOptions {
   compression?: ExportCompression | undefined;
   /** Optional seq/time slice; omitted exports the whole recording. */
   range?: ExportRange | undefined;
+  /** Add a generated Playwright Test script (script.spec.ts) to the package. */
+  script?: boolean | undefined;
 }
 export interface ExportProgress {
   phase: string;
