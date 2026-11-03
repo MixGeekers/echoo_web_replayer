@@ -3,6 +3,8 @@ import type {
   ExportWorkerCommand, ExportWorkerData, WorkerMessage,
 } from '../../shared/contracts/export';
 import { sessionMetadata } from '../storage/values';
+import { parseAnnotationSet } from '../storage/annotation-store';
+import type { ExportRange, ResolvedExportRange } from '../../shared/contracts/annotations';
 
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('无效的导出工作线程消息');
@@ -14,6 +16,10 @@ function string(value: unknown): string {
 }
 function number(value: unknown): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw new Error('导出消息计数必须为非负安全整数');
+  return value;
+}
+function boolean(value: unknown): boolean {
+  if (typeof value !== 'boolean') throw new Error('导出消息字段必须为布尔值');
   return value;
 }
 const optionalString = (value: unknown) => value === undefined ? undefined : string(value);
@@ -39,11 +45,30 @@ export function readWorkerData(value: unknown): ExportWorkerData {
       metadata, timelinePath: string(capture.timelinePath), byteLength: number(capture.byteLength),
       capturedAt: string(capture.capturedAt),
       resourcePath, resourceBytes,
+      annotations: capture.annotations === undefined || capture.annotations === null ? null : parseAnnotationSet(capture.annotations, sessionId),
     },
     sessionId, destination: string(raw.destination), appVersion: optionalString(raw.appVersion),
     encoding: raw.encoding === undefined ? undefined : encoding(raw.encoding),
     compression: raw.compression === undefined ? undefined : compression(raw.compression),
+    range: exportRange(raw.range),
+    script: raw.script === undefined ? undefined : boolean(raw.script),
   };
+}
+function exportRange(value: unknown): ExportRange | undefined {
+  if (value === undefined || value === null) return undefined;
+  const raw = record(value), range: ExportRange = {};
+  for (const key of Object.keys(raw)) if (!['startSeq', 'endSeq', 'startMs', 'endMs'].includes(key)) throw new Error('未知的导出范围字段');
+  for (const key of ['startSeq', 'endSeq', 'startMs', 'endMs'] as const) if (raw[key] !== undefined) range[key] = number(raw[key]);
+  return range;
+}
+function resolvedRange(value: unknown): ResolvedExportRange | undefined {
+  if (value === undefined) return undefined;
+  const raw = record(value);
+  const keys = ['requestedStartSeq', 'requestedEndSeq', 'startSeq', 'endSeq', 'startByte', 'endByte', 'startElapsedMs', 'endElapsedMs',
+    'sourceEventCount', 'sourceLastSeq', 'sourceTimelineBytes', 'eventCount', 'actionCount', 'mutationCount', 'snapshotCount'] as const;
+  const result = { baselineSnapshotSeq: raw.baselineSnapshotSeq === null ? null : number(raw.baselineSnapshotSeq) } as ResolvedExportRange;
+  for (const key of keys) result[key] = number(raw[key]);
+  return result;
 }
 export function readWorkerCommand(value: unknown): ExportWorkerCommand {
   if (record(value).type !== 'cancel') throw new Error('未知的导出工作线程命令');
@@ -66,6 +91,7 @@ function result(value: unknown): ExportResult {
     encoding: encoding(raw.encoding), compression: compression(raw.compression),
     bytes: number(raw.bytes), timelineBytes: number(raw.timelineBytes), sha256: string(raw.sha256),
     fileCount: number(raw.fileCount), blocks: optionalNumber(raw.blocks), deltaBlocks: optionalNumber(raw.deltaBlocks),
+    range: resolvedRange(raw.range), annotationCount: optionalNumber(raw.annotationCount),
   };
 }
 export function readWorkerMessage(value: unknown): WorkerMessage {

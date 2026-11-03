@@ -11,7 +11,9 @@ export function agentReadme(
   metadata: SessionMetadata,
   capturedAt: string,
   appVersion: string,
-  { encoding = "delta", compression = "deflate" }: ExportOptions = {},
+  { encoding = "delta", compression = "deflate", script = false }: ExportOptions = {},
+  /** Optional sections placed before the restore steps (annotations, range). */
+  preface = "",
 ) {
   return `# TraceDock · Agent 分析说明
 
@@ -25,7 +27,7 @@ export function agentReadme(
 - 截点状态：${metadata.status}
 - 已纳入事件：${metadata.eventCount} 条（序号至 ${metadata.lastSeq}）
 - 数据处理：V1 不做数据脱敏；页面内容、输入值（包括密码字段）按实际采集结果保留。
-
+${preface}
 ## 先恢复并验证
 
 本包容器格式为 V2；数据编码：${encoding === "delta" ? "无损差分" : "完整文件"}；ZIP 压缩：${compression === "deflate" ? "DEFLATE" : "关闭（STORE）"}。
@@ -64,7 +66,7 @@ Python 3.10+，只使用标准库，无需安装依赖或联网；将 recording.
 | --- | --- |
 | id / sessionId | 会话内唯一事件 ID / 所属会话 ID |
 | seq | 主进程接收并持久化的严格递增序号；按此排列时间线 |
-| type | action.*、dom.*、page.*、session.* 或 recorder.* |
+| type | action.*、dom.*、page.*、network.*、console.*、session.* 或 recorder.* |
 | timestamp | 事件来源的 UTC ISO 时间；跨页面可能存在时钟差异 |
 | receivedAt | 主进程持久化此事件时的 UTC ISO 时间 |
 | elapsedMs | 从会话开始到接收时经过的毫秒数，单调不减，包含暂停时间 |
@@ -80,6 +82,12 @@ Python 3.10+，只使用标准库，无需安装依赖或联网；将 recording.
 - \`session.*\`：录制开始、暂停、恢复、结束或中断等控制边界。暂停期间不是连续观测；恢复快照给出恢复时的基线。
 - \`recorder.error\`：采集错误，分析覆盖范围时必须纳入。
 
+### 网络请求与控制台
+
+- \`network.request / network.response / network.failed\`：页面 XHR、Fetch 与文档导航请求，按 \`payload.requestId\` 关联（重定向沿用同一 ID，每一跳记录一条 3xx 响应）。payload 含 url、method、resourceType、status、statusText、mimeType、startedAt、durationMs、请求头与响应头；请求体 \`postData\` 上限 256 KiB，文本类响应正文 \`body\`（JSON / 文本 / XML / HTML / JS）上限 512 KiB，\`truncated\` 与 \`bytes\` 标明截断与原始大小；二进制、文档正文及超限正文以 \`bodyOmitted\` 说明原因。
+- \`console.message\`：页面主世界的 console 调用，含 level（log / info / warn / error / debug）、method、合并后的文本和来源位置及调用栈；\`console.exception\`：未捕获异常与未处理的 Promise 拒绝，含 kind、消息、来源位置与堆栈。TraceDock 自身隔离环境中的脚本不记录。旧的 \`page.error\` 仍表示页面加载失败。
+- 仅在采集进行中记录，暂停期间不记录；跨域 iframe（独立进程）中的请求和日志不在范围内。请求头不含浏览器另行附加的 Cookie 等底层头。timeline.md 末尾汇总失败请求（HTTP ≥ 400 或网络失败）和页面异常。
+
 ### DOM 快照与变化
 
 - \`dom.snapshot.payload.html\` 保存主文档 HTML；若存在 \`tree\` 则包含用于关联变化的节点 ID / 结构；\`forms\` 保存当前表单属性值，不能仅用 HTML attribute 推断输入值。
@@ -92,8 +100,12 @@ Python 3.10+，只使用标准库，无需安装依赖或联网；将 recording.
 
 首版记录浏览器 UI 操作、主文档 DOM 变化、可访问的 DOM 快照及页面状态。可访问 iframe / open Shadow DOM 的具体覆盖应检查每个快照的 coverage 和实际内容。跨域 iframe、closed Shadow DOM、浏览器原生 UI、扩展页面、Canvas/WebGL 像素和跨进程内容无法视为完整 DOM 覆盖。
 
-新录制可包含 resources.jsonl 和 assets/<sha256>，保存实际加载的 CSS、图片和字体响应；完整/差分包均校验并恢复它们。资源索引包含 URL、MIME、SHA-256、字节数、关联 seq 和失败原因。此包不是完整网络 HAR、视频或浏览器配置备份；不能假设包含未列出的资源、API 响应、下载内容、Cookie、localStorage 或截图。CSS 动画、CSSOM 修改和 JS 内存状态也无法从 DOM 变化完整重建。连续滚动会节流合并；DOM 变化会批处理。导航和浏览器崩溃可能造成最后尚未送达的事件不可恢复，若发生恢复以 session.interrupted / coverage / 错误事件为依据。
+新录制可包含 resources.jsonl 和 assets/<sha256>，保存实际加载的 CSS、图片和字体响应；完整/差分包均校验并恢复它们。资源索引包含 URL、MIME、SHA-256、字节数、关联 seq 和失败原因。此包不是完整网络 HAR、视频或浏览器配置备份；network.* 只覆盖 XHR / Fetch / 文档请求且正文有上限，不能假设包含未列出的资源、API 响应、下载内容、Cookie、localStorage 或截图。CSS 动画、CSSOM 修改和 JS 内存状态也无法从 DOM 变化完整重建。连续滚动会节流合并；DOM 变化会批处理。导航和浏览器崩溃可能造成最后尚未送达的事件不可恢复，若发生恢复以 session.interrupted / coverage / 错误事件为依据。
 
 本次导出以读取到的时间线字节边界为准；导出过程中后来产生的事件不包含在这个包内。原始 JSONL 是事实来源，Markdown 是索引。数据脱敏、自动生成并执行回放、跨站稳定性保证不属于 V1。
-`;
+${script ? `
+## 附带的 Playwright 脚本
+
+\`script.spec.ts\` 是 TraceDock 按同一截点从时间线操作事件推断生成的 Playwright Test（TypeScript）草稿，已列入 files.jsonl 校验，restore.py 会把它复制到恢复目录。每个步骤上方的 \`// seq N\` 对应 timeline.jsonl 的事件序号；连续输入合并为一次 fill，滚动和焦点默认省略，暂停、采集错误和无法定位的目标以 TODO 注释标出。它是派生材料而非事实来源：定位器取自录制时的候选项，可能不唯一或随页面版本失效；脚本没有执行验证，请结合 timeline.jsonl 与快照复核后再运行（\`npx playwright test script.spec.ts\`）。脚本保留录制时的原始输入值。
+` : ""}`;
 }

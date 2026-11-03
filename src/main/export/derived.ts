@@ -3,6 +3,7 @@ import type { JsonToken } from "../storage/tokens";
 import type { SessionMetadata } from "../../shared/contracts/storage";
 import type { FileEntry, ExportSignals } from "../../shared/contracts/export";
 import { errorOf } from "../storage/values";
+import { createIssueCollector } from "./issues";
 type ScalarValue = string | number | boolean | null;
 interface DerivedEvent {
   fields: Record<string, Spool>;
@@ -429,6 +430,7 @@ async function deriveFiles({
   staging,
   metadata,
   capturedAt,
+  preface = "",
   onFile = async () => {},
   onSnapshot = async () => {},
   signal,
@@ -439,6 +441,8 @@ async function deriveFiles({
   staging: string;
   metadata: Pick<SessionMetadata, "id" | "name">;
   capturedAt: string;
+  /** Optional Markdown placed before the event table, such as human annotations. */
+  preface?: string;
   onFile?: (item: FileEntry) => Promise<unknown>;
   onSnapshot?: (item: SnapshotEntry) => Promise<unknown>;
 }) {
@@ -453,6 +457,7 @@ async function deriveFiles({
     signal,
   );
   const pendingOutputs = new Set([markdown]);
+  const issues = createIssueCollector();
   const counts = {
     eventCount: 0,
     lastSeq: 0,
@@ -596,11 +601,12 @@ async function deriveFiles({
     await markdown.write(
       `| ${values.seq} | ${(Number(values.elapsedMs || 0) / 1000).toFixed(3)}s | ${cell(values.timestamp)} | ${cell(values.type)} | ${cell(summary)} | ${link} |\n`,
     );
+    issues.add(values);
     await disposeEvent();
   }
   try {
     await markdown.write(
-      `# ${cell(metadata.name)} · 完整事件索引\n\n会话：${cell(metadata.id)}  \n导出截点：${cell(capturedAt)}  \n原始数据见 timeline.jsonl；摘要仅供检索。\n\n| 序号 | 相对时间 | UTC 时间 | 类型 | 摘要 | 快照 |\n| --- | --- | --- | --- | --- | --- |\n`,
+      `# ${cell(metadata.name)} · 完整事件索引\n\n会话：${cell(metadata.id)}  \n导出截点：${cell(capturedAt)}  \n原始数据见 timeline.jsonl；摘要仅供检索。\n\n${preface}| 序号 | 相对时间 | UTC 时间 | 类型 | 摘要 | 快照 |\n| --- | --- | --- | --- | --- | --- |\n`,
     );
     for await (const token of tokens as AsyncIterable<JsonToken>) {
       if ((++processed & 1023) === 0) {
@@ -681,6 +687,7 @@ async function deriveFiles({
       ("bytesRead" in input ? input.bytesRead : 0) !== byteLength
     )
       throw new Error("时间线读取不完整");
+    if (issues.total) await markdown.write(issues.markdown());
     await markdown.finish(true);
     pendingOutputs.delete(markdown);
     await reportFile("timeline.md");

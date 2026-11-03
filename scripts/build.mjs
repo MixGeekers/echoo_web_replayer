@@ -39,9 +39,17 @@ await build({
     exporter: "src/main/export/job.ts",
     "export-worker": "src/main/export/worker.ts",
     "export-derived": "src/main/export/derived.ts",
+    codegen: "src/main/codegen/index.ts",
     "delta-codec": "src/main/export/delta-codec.ts",
     "delta-zip": "src/main/export/zip.ts",
     "resource-recorder": "src/main/resources/index.ts",
+    "network-capture": "src/main/network/capture.ts",
+    "network-events": "src/shared/network-events.ts",
+    "mcp-network-query": "src/main/mcp/network-query.ts",
+    "export-issues": "src/main/export/issues.ts",
+    "annotation-store": "src/main/storage/annotation-store.ts",
+    annotations: "src/main/annotations.ts",
+    "export-range": "src/main/export/range.ts",
   },
 });
 await build({

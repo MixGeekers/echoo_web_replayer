@@ -1,9 +1,14 @@
 import type { SessionCapture } from "./storage";
+import type { AnnotationSet, ExportRange, ResolvedExportRange } from "./annotations";
 export type ExportEncoding = "delta" | "full";
 export type ExportCompression = "deflate" | "store";
 export interface ExportOptions {
   encoding?: ExportEncoding | undefined;
   compression?: ExportCompression | undefined;
+  /** Optional seq/time slice; omitted exports the whole recording. */
+  range?: ExportRange | undefined;
+  /** Add a generated Playwright Test script (script.spec.ts) to the package. */
+  script?: boolean | undefined;
 }
 export interface ExportProgress {
   phase: string;
@@ -29,6 +34,8 @@ export interface ExportResult {
   fileCount: number;
   blocks?: number | undefined;
   deltaBlocks?: number | undefined;
+  range?: ResolvedExportRange | undefined;
+  annotationCount?: number | undefined;
 }
 export interface FileDigest {
   bytes: number;
@@ -44,7 +51,10 @@ export interface ExportSignals {
 export type ExportCapture = Pick<
   SessionCapture,
   "metadata" | "timelinePath" | "byteLength" | "capturedAt" | "resourcePath" | "resourceBytes"
->;
+> & {
+  /** Annotations read at the same boundary; the worker clips them to the exported seq range. */
+  annotations?: AnnotationSet | null | undefined;
+};
 export interface PreparedExport extends ExportOptions, ExportSignals {
   capture: ExportCapture;
   sessionId: string;

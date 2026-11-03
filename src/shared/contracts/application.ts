@@ -1,5 +1,6 @@
 import type { RecorderPayloadMap } from "./recording";
-export interface ApplicationPayloadMap {
+import type { NetworkPayloadMap } from "./network";
+export interface ApplicationPayloadMap extends NetworkPayloadMap {
   "session.start": { name: string; appVersion: string; redaction: boolean };
   "session.pause": { reason: string };
   "session.resume": { reason: string; note: string };

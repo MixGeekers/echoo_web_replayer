@@ -514,6 +514,13 @@ body.mcp-panel-open .timeline-card { display: none; }
   .mcp-collaboration { gap: 6px; max-width: 360px; }
 }
 @media (prefers-reduced-motion: reduce) { .mcp-entry, .mcp-status-button { transition: none; } }
+/* Network / console timeline events */
+.timeline-filters { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
+.timeline-filters button { white-space: nowrap; }
+.event-icon.network { background: var(--echo-foundation-cyan-50); border-color: var(--echo-foundation-cyan-200); color: var(--echo-foundation-cyan-700); }
+.event-icon.console { background: var(--echo-surface-muted); border-color: var(--echo-border-default); color: var(--echo-text-secondary); }
+.event-icon.issue { background: var(--echo-semantic-danger-background); border-color: var(--el-color-danger-light-7); color: var(--echo-semantic-danger-text); }
+.timeline-event.issue .event-name, .timeline-event.issue .event-summary { color: var(--echo-semantic-danger-text); }
 
 /* 专注模式：收起左右侧栏，只保留中央浏览器 / 回放区域。主动打开的 Agent 面板仍可显示。 */
 .focus-mode-button[aria-pressed="true"] { color: var(--echo-semantic-brand-text); background: var(--echo-semantic-brand-background); }

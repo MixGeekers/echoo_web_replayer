@@ -9,7 +9,7 @@ import type { BrowserState, EventNotice } from "../shared/contracts/ui";
 export type { BrowserState } from "../shared/contracts/ui";
 interface Options {
   store: SessionStore;
-  resources: ResourceRecorder;
+  resources: Pick<ResourceRecorder, "start" | "stop">;
   browser: WebContentsView;
   browserState: BrowserState;
   appVersion: string;

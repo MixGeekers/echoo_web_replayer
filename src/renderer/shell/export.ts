@@ -6,10 +6,12 @@ import type {
   ExportProgress,
   ExportOptions,
 } from "../../shared/contracts/ui";
+import type { ExportRange } from "../../shared/contracts/annotations";
 const phaseLabels: Record<string, string> = {
   selecting: "选择保存位置…", preparing: "准备记录…", prepare: "准备记录…",
   encode: "整理数据", validate: "校验记录", derive: "生成阅读材料",
   archive: "生成 ZIP", complete: "完成校验…", writing: "写入分析包…",
+  script: "生成 Playwright 脚本",
 };
 export const exportProgressLabel = (phase: string) => phaseLabels[phase] || "正在导出…";
 interface Options {
@@ -25,6 +27,8 @@ interface Options {
     error?: boolean,
     sessionId?: string | null,
   ): void;
+  /** Optional slice chosen in the dialog; undefined exports the whole recording. */
+  range?(): ExportRange | undefined;
 }
 export function createExportUI(api: CollectorAPI, options: Options) {
   async function run<T>(task: () => Promise<T>): Promise<T | undefined> {
@@ -57,6 +61,7 @@ export function createExportUI(api: CollectorAPI, options: Options) {
       exportOptions = {
         encoding: saved.encoding,
         compression: saved.compression,
+        script: "script" in saved && saved.script === true,
       };
   } catch {}
   function updateExportProgress(progress: ExportProgress) {
@@ -105,6 +110,7 @@ export function createExportUI(api: CollectorAPI, options: Options) {
     el("export-mode-full", "input").checked = exportOptions.encoding === "full";
     el("export-compression", "input").checked =
       exportOptions.compression === "deflate";
+    el("export-script", "input").checked = exportOptions.script === true;
     options.showDialog(el("export-dialog", "dialog"));
   });
   el("cancel-export-dialog-button", "button").addEventListener("click", () =>
@@ -114,11 +120,13 @@ export function createExportUI(api: CollectorAPI, options: Options) {
     event.preventDefault();
     if (!exportSessionId || exporting) return;
     const sessionId = exportSessionId;
+    const range = options.range?.();
     exportOptions = {
       encoding: el("export-mode-full", "input").checked ? "full" : "delta",
       compression: el("export-compression", "input").checked
         ? "deflate"
         : "store",
+      script: el("export-script", "input").checked,
     };
     try {
       localStorage.setItem(
@@ -130,7 +138,7 @@ export function createExportUI(api: CollectorAPI, options: Options) {
     exportCancelRequested = false;
     updateExportProgress({ sessionId, phase: "selecting" });
     const result = await run(() =>
-      api.exportSession({ sessionId, ...exportOptions }),
+      api.exportSession({ sessionId, ...exportOptions, ...(range ? { range } : {}) }),
     );
     exporting = false;
     el("export-progress", "div").hidden = true;

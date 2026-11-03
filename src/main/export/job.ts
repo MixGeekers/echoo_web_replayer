@@ -10,6 +10,7 @@ import type {
 import type { SessionStore } from "../storage/session-store";
 import { checkAbort } from "./delta-codec";
 import { validateOptions } from "./options";
+import { readAnnotationFile } from "../storage/annotation-store";
 interface PreparedExportOptions extends ExportOptions, ExportSignals {
   store?: SessionStore | undefined;
   sessionId: string;
@@ -28,6 +29,8 @@ export async function exportSession({
   appVersion = "0.2.0",
   encoding = "delta",
   compression = "deflate",
+  range,
+  script = false,
   signal,
   onProgress,
 }: PreparedExportOptions): Promise<ExportResult> {
@@ -40,6 +43,13 @@ export async function exportSession({
   checkAbort(signal);
   if (!boundary?.metadata || boundary.metadata.id !== sessionId)
     throw new Error("导出截点与会话不一致");
+  const known = capture?.annotations;
+  const annotations =
+    known !== undefined
+      ? known
+      : store
+        ? await readAnnotationFile(store.getSessionDirectory(sessionId), sessionId)
+        : null;
   return new Promise<ExportResult>((resolve, reject) => {
     const worker = new Worker(path.join(__dirname, "export-worker.cjs"), {
       workerData: {
@@ -50,12 +60,15 @@ export async function exportSession({
           capturedAt: boundary.capturedAt,
           resourcePath: boundary.resourcePath,
           resourceBytes: boundary.resourceBytes,
+          annotations,
         },
         sessionId,
         destination,
         appVersion,
         encoding,
         compression,
+        range,
+        script,
       },
     });
     let settled = false;

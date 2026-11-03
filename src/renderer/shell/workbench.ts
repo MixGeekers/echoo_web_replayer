@@ -2,6 +2,8 @@ import { createLifecycleUI } from "./lifecycle";
 import { createTimeline } from "./timeline";
 import { createExportUI } from "./export";
 import { createMCPUI } from "./mcp";
+import { createAnnotationsUI } from "./annotations";
+import { createCodegenUI } from "./codegen";
 import { createFocusMode } from "./focus";
 import { formatDate, count, statusName } from "./format";
 import { element as el, required, message } from "./dom";
@@ -53,12 +55,24 @@ export function startWorkbench(): void {
   const selectedSession = () =>
     state.sessions.find((s) => s.id === selectedSessionId) ||
     (state.session?.id === selectedSessionId ? state.session : null);
+  const annotations = createAnnotationsUI(api, {
+    sessionId: () => selectedSession() && lifecycle.effectiveState(selectedSession()!) === "trashed" ? null : selectedSessionId,
+    selectedSession,
+    state: () => state,
+    active,
+    busy: () => busy,
+    inspect: (event) => timeline.inspect(event),
+    repaintTimeline: () => timeline.render(),
+    notify,
+  });
   const timeline = createTimeline(api, replay, {
     sessionId: () => selectedSession() && lifecycle.effectiveState(selectedSession()!) === "trashed" ? null : selectedSessionId,
     selectedSession,
     state: () => state,
     active,
     notify,
+    decorate: (button, event) => annotations.decorate(button, event),
+    inspected: (event) => annotations.inspected(event),
   });
   const exportUI = createExportUI(api, {
     sessionId: () => selectedSessionId,
@@ -68,6 +82,7 @@ export function startWorkbench(): void {
     showDialog,
     closeDialog,
     notify,
+    range: () => annotations.range(),
   });
 
   const lifecycle = createLifecycleUI({
@@ -86,6 +101,13 @@ export function startWorkbench(): void {
     repaint: renderState,
     closeReplay: () => replay.close(),
     replaySessionId: () => replay.sessionId,
+    showDialog,
+    closeDialog,
+    notify,
+  });
+  const codegenUI = createCodegenUI(api, {
+    sessionId: () => selectedSession() && lifecycle.effectiveState(selectedSession()!) === "trashed" ? null : selectedSessionId,
+    selectedSession,
     showDialog,
     closeDialog,
     notify,
@@ -333,6 +355,7 @@ export function startWorkbench(): void {
       `结束：${state.session?.name || "当前会话"}`;
     el("export-button", "button").disabled = !session || lifecycle.effectiveState(session) === "trashed" || exportUI.busy || busy;
     el("replay-button", "button").disabled = !session?.snapshotCount || lifecycle.effectiveState(session) === "trashed" || busy;
+    codegenUI.render(busy);
     el("export-button", "button").title = session
       ? `导出所选采集记录：${session.name}`
       : "先选择一条采集记录";
@@ -399,6 +422,7 @@ export function startWorkbench(): void {
     lifecycle.render();
     renderSessions();
     mcp.render();
+    annotations.sync();
     scheduleBounds();
   }
 

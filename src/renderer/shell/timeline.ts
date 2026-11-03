@@ -10,12 +10,17 @@ import type {
   TimelineQuery,
 } from "../../shared/contracts/ui";
 import type { ReplayPanel } from "../replay-panel";
+import { networkPresentation, isNetworkEvent, networkDetail, NETWORK_DETAIL_BYTES } from "./network-view";
 interface Options {
   sessionId(): string | null;
   selectedSession(): SessionMetadata | null | undefined;
   state(): AppState;
   active(): boolean | null;
   notify(title: string, message?: string, error?: boolean): void;
+  /** Optional row decoration, such as an annotation bookmark marker. */
+  decorate?(button: HTMLButtonElement, event: EventPreview): void;
+  /** Called when the details panel shows an event. */
+  inspected?(event: EventPreview | null): void;
 }
 export function createTimeline(
   api: CollectorAPI,
@@ -69,6 +74,8 @@ export function createTimeline(
       "session.resume": ["继续采集", "play", "session"],
       "session.stop": ["结束采集", "stop", "session"],
     };
+    const network = networkPresentation(event);
+    if (network) return network;
     const specific = descriptions[type];
     if (specific) return specific;
     if (type.startsWith("page.")) return ["页面事件", "globe", "page"];
@@ -139,7 +146,7 @@ export function createTimeline(
     const [label, iconName, category] = eventPresentation(event);
     const summaryText = escapeText(eventSummary(event), 500);
     const button = document.createElement("button");
-    button.className = "timeline-event";
+    button.className = `timeline-event${category.endsWith(" issue") ? " issue" : ""}`;
     button.dataset.eventId = rowKey(event);
     button.setAttribute(
       "aria-label",
@@ -188,6 +195,7 @@ export function createTimeline(
         rows.set(key, row);
       }
       row.button.classList.toggle("selected", event.id === selectedEventId);
+      options.decorate?.(row.button, event);
       fragment.append(row.button);
     }
     for (const id of rows.keys()) if (!eventsById.has(id)) rows.delete(id);
@@ -349,6 +357,7 @@ export function createTimeline(
     el("detail-meta", "div").textContent =
       `#${event.seq} · ${formatTime(event.timestamp)} · ${event.url || "本地记录"}`;
     el("detail-json", "pre").textContent = "正在读取事件…";
+    options.inspected?.(event);
     renderTimeline();
     if (replay.active) replay.seek(undefined, event.seq);
     const full = await run(() =>
@@ -356,11 +365,13 @@ export function createTimeline(
         sessionId: required(selectedSessionId),
         eventId,
         preview: true,
-        maxBytes: 100000,
+        maxBytes: isNetworkEvent(event.type) ? NETWORK_DETAIL_BYTES : 100000,
       }),
     );
     if (selectedEventId !== eventId) return;
-    if (full) {
+    const formatted = full && networkDetail(event.type, String(full.preview ?? ""), full.truncated === true);
+    if (formatted) el("detail-json", "pre").textContent = formatted;
+    else if (full) {
       let preview = typeof full.preview === "string" ? full.preview : "";
       if (!full.truncated) {
         try {
@@ -408,12 +419,14 @@ export function createTimeline(
   el("close-detail-button", "button").addEventListener("click", () => {
     selectedEventId = null;
     el("event-detail", "div").hidden = true;
+    options.inspected?.(null);
     renderTimeline();
   });
   return {
     refresh: refreshTimeline,
     schedule: scheduleRefresh,
     render: renderTimeline,
+    inspect: inspectEvent,
     get follow() {
       return follow;
     },

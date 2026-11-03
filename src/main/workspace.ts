@@ -17,6 +17,7 @@ import { planLibraryBatch } from "./library-batch";
 import { errorMessage } from "../shared/runtime";
 import type { MCPState } from "../shared/contracts/mcp";
 import { isAgentInputDispatch } from "./mcp/browser";
+import { NetworkCapture } from "./network/capture";
 
 interface MCPHooks {
   snapshot(): MCPState;
@@ -173,7 +174,14 @@ export async function createWorkspace(win: BrowserWindow, demoURL: string) {
     browser.setBackgroundColor("#ffffff");
     browserState = {available:true,url:demoURL,title:"交互实验室",loading:false,canGoBack:false,canGoForward:false,error:null};
     const resources = new ResourceRecorder(store,browser.webContents,notify);
-    const recording = createRecordingController({store,resources,browser,browserState,profile:()=>profiles.get(id),
+    const network = new NetworkCapture(browser.webContents,{
+      recordingId:()=>{const s=recording.currentSession();return s?.status==="recording"?s.id:null;},
+      record:(type,payload,extra)=>recording.append(type,payload,extra),
+      error:message=>console.error("[TraceDock]",message),
+    });
+    // Network/console capture opens and closes with the same recording boundaries as resources.
+    const capture = {start:async(id:string|null)=>{await resources.start(id);network.start();},stop:async()=>{await network.stop();await resources.stop();}};
+    const recording = createRecordingController({store,resources:capture,browser,browserState,profile:()=>profiles.get(id),
       appVersion:app.getVersion(),notify,notifyLater,reportError,publish:event => {
         if(!win.isDestroyed()) win.webContents.send("collector:event",event);
       }});
@@ -204,6 +212,8 @@ export async function createWorkspace(win: BrowserWindow, demoURL: string) {
     try {
       await browser.webContents.loadURL("about:blank");
       await resources.init(root);
+      await network.init();
+      browser.webContents.once("destroyed",()=>{network.close().catch(reportError);});
       navigation.installEvents();
       await profiles.select(id);
       await navigation.navigate(demoURL);
