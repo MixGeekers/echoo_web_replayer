@@ -124,6 +124,8 @@ export interface CollectorAPI {
   onEvent(callback: (event: EventNotice) => void): () => void;
   onError(callback: (error: string) => void): () => void;
   onExportProgress(callback: (progress: ExportProgress) => void): () => void;
+  /** 内嵌网页获得焦点时，主进程转发的专注模式快捷键。 */
+  onToggleFocusMode(callback: () => void): () => void;
 }
 declare global {
   interface Window {

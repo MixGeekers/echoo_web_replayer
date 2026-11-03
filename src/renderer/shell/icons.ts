@@ -31,6 +31,7 @@ const icons: Record<string, string> = {
   pulse: '<path d="M2 12h5l3-7 4 14 3-7h5"/>',
   search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/>',
   "chevron-down": '<path d="m6 9 6 6 6-6"/>',
+  focus: '<path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/><rect x="9" y="9" width="6" height="6" rx="1"/>',
   close: '<path d="m6 6 12 12M6 18 18 6"/>',
   check: '<path d="m5 12 4 4L19 6"/>',
   click: '<path d="m5 3 14 10-7 1-3 7L5 3Z"/><path d="m13 15 4 6"/>',
