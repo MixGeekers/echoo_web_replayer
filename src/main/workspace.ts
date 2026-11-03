@@ -71,6 +71,7 @@ export async function createWorkspace(win: BrowserWindow, demoURL: string) {
   let closing = false;
   let mcp: MCPHooks | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let lazyTimer: ReturnType<typeof setTimeout> | undefined;
   let bounds: BrowserBounds = {x:250,y:190,width:800,height:650,visible:false};
   let browserState: BrowserState = {available:false,url:"",title:"未打开 Profile",loading:false,canGoBack:false,canGoForward:false,error:null};
   const reportError = (error: unknown) => {
@@ -92,7 +93,13 @@ export async function createWorkspace(win: BrowserWindow, demoURL: string) {
       throw new Error("浏览环境正在恢复，请稍后重试");
     return runtime;
   }
+  // 录制中每个事件都会触发；完整状态最多每秒推送一次，计数随事件通知增量送达。
+  const notifyLater = () => {
+    if (lazyTimer) return;
+    lazyTimer = setTimeout(() => { lazyTimer = undefined; notify(); }, 1000);
+  };
   const notify = () => {
+    clearTimeout(lazyTimer); lazyTimer = undefined;
     clearTimeout(timer);
     timer = setTimeout(() => {
       if (!win.isDestroyed()) win.webContents.send("collector:state", state());
@@ -175,7 +182,7 @@ export async function createWorkspace(win: BrowserWindow, demoURL: string) {
     // Network/console capture opens and closes with the same recording boundaries as resources.
     const capture = {start:async(id:string|null)=>{await resources.start(id);network.start();},stop:async()=>{await network.stop();await resources.stop();}};
     const recording = createRecordingController({store,resources:capture,browser,browserState,profile:()=>profiles.get(id),
-      appVersion:app.getVersion(),notify,reportError,publish:event => {
+      appVersion:app.getVersion(),notify,notifyLater,reportError,publish:event => {
         if(!win.isDestroyed()) win.webContents.send("collector:event",event);
       }});
     const navigation = createBrowserController({browser,browserState,demoURL,notify,reportError,
@@ -387,7 +394,7 @@ export async function createWorkspace(win: BrowserWindow, demoURL: string) {
           if(contents&&!contents.isDestroyed())contents.close();runtime=null;}
       });
       await exportClosing;
-      await store.flush();clearTimeout(timer);
+      await store.flush();clearTimeout(timer);clearTimeout(lazyTimer);
       } catch (error) {closing=false; notify(); throw error;}
     },
   };

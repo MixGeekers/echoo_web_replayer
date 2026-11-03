@@ -37,4 +37,4 @@
 - `output/derived-stream-check/result.json`
 - `output/playwright/smoke-summary.json`
 
-验证范围是存储读取、导出和恢复。浏览器采集器一次构建完整快照的上游内存开销仍存在。MCP/Playwright 仅完成独立隔离原型，尚未接入正式软件。
+验证范围是存储读取、导出和恢复。浏览器采集器一次构建完整快照的上游内存开销仍存在。MCP/Playwright 在本记录日期时仅完成独立隔离原型；本地 MCP 之后已接入正式软件，其验收为 `npm run test:mcp` 与 `npm run test:mcp-browser`，并已纳入 CI。

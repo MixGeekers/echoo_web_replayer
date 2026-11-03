@@ -9,7 +9,7 @@ import { formatDate, count, statusName } from "./format";
 import { element as el, required, message } from "./dom";
 import { svg } from "./icons";
 import { ReplayPanel } from "../replay-panel";
-import type { AppState } from "../../shared/contracts/ui";
+import type { AppState, SessionCounters } from "../../shared/contracts/ui";
 export function startWorkbench(): void {
   document.querySelectorAll<HTMLElement>("[data-icon]").forEach((el) => {
     el.innerHTML = svg(el.dataset.icon);
@@ -426,6 +426,24 @@ export function startWorkbench(): void {
     scheduleBounds();
   }
 
+  /** 用事件附带的计数局部更新统计，不重绘记录库；完整状态仍会低频推送。 */
+  function applyCounters(sessionId: string, counters: SessionCounters) {
+    let changed = false;
+    for (const target of [state.session, state.sessions.find((s) => s.id === sessionId)]) {
+      if (!target || target.id !== sessionId || target.lastSeq >= counters.lastSeq) continue;
+      Object.assign(target, counters);
+      changed = true;
+    }
+    if (!changed || sessionId !== selectedSessionId) return;
+    const session = selectedSession();
+    el("action-count", "strong").textContent = (session?.actionCount || 0).toLocaleString("zh-CN");
+    el("mutation-count", "strong").textContent = (session?.mutationCount || 0).toLocaleString("zh-CN");
+    el("snapshot-count", "strong").textContent = (session?.snapshotCount || 0).toLocaleString("zh-CN");
+    el("timeline-count", "span").textContent = String(session?.eventCount || 0);
+    // 有了第一份快照后回放按钮才可用。
+    el("replay-button", "button").disabled = !session?.snapshotCount || lifecycle.effectiveState(session) === "trashed" || busy;
+  }
+
   function handleState(next: AppState) {
     const previousSelected = selectedSessionId;
     const previousSession = selectedSession();
@@ -603,6 +621,7 @@ export function startWorkbench(): void {
   }
   api.onState(handleState);
   api.onEvent((event) => {
+    if (event.counters) applyCounters(event.sessionId, event.counters);
     if (
       timeline.follow &&
       (!event.sessionId || event.sessionId === selectedSessionId)

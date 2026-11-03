@@ -39,8 +39,34 @@ export class NodeRegistry {
       return "";
     }
   }
+  /**
+   * 同一次同步处理（一批 DOM 变化或一次快照）内，页面脚本不会运行，DOM 不变，
+   * 因此可以按节点缓存选择器与作用域，结果与逐次计算完全一致。
+   */
+  private cache: {
+    selectors: Map<Node, string | null>;
+    paths: Map<Element, string>;
+    scopes: Map<Node, Scope>;
+  } | null = null;
+  withCache<T>(operation: () => T): T {
+    if (this.cache) return operation();
+    this.cache = { selectors: new Map(), paths: new Map(), scopes: new Map() };
+    try {
+      return operation();
+    } finally {
+      this.cache = null;
+    }
+  }
   selector(node: Node | null | undefined): string | null {
-    let element = isElement(node) ? node : node?.parentElement;
+    if (!node) return null;
+    const cache = this.cache;
+    if (cache?.selectors.has(node)) return cache.selectors.get(node) ?? null;
+    const value = this.computeSelector(node);
+    cache?.selectors.set(node, value);
+    return value;
+  }
+  private computeSelector(node: Node): string | null {
+    const element = isElement(node) ? node : node.parentElement;
     if (!element) return null;
     const root = element.getRootNode();
     try {
@@ -59,25 +85,48 @@ export class NodeRegistry {
     } catch {
       /* A stale root can invalidate a selector probe. */
     }
-    const parts: string[] = [];
-    while (element) {
-      let part = CSS.escape(
-        element.localName || element.nodeName.toLowerCase(),
-      );
-      const parent: HTMLElement | null = element.parentElement;
-      const container: Node | null = parent || element.parentNode;
-      const currentName = element.localName;
-      if (isParentNode(container) && container.children) {
-        const siblings = Array.from(container.children).filter(
-          (sibling) => sibling.localName === currentName,
-        );
-        if (siblings.length > 1)
-          part += `:nth-of-type(${siblings.indexOf(element) + 1})`;
+    return this.structuralPath(element);
+  }
+  /** 从根到元素的 `tag:nth-of-type()` 路径；祖先路径在缓存期间复用。 */
+  private structuralPath(element: Element): string {
+    const paths = this.cache?.paths;
+    const chain: Element[] = [];
+    let current: Element | null = element,
+      prefix = "";
+    while (current) {
+      const known = paths?.get(current);
+      if (known !== undefined) {
+        prefix = known;
+        break;
       }
-      parts.unshift(part);
-      element = parent;
+      chain.push(current);
+      current = current.parentElement;
     }
-    return parts.join(" > ");
+    for (let at = chain.length - 1; at >= 0; at--) {
+      const item = chain[at]!;
+      const part = this.pathPart(item);
+      prefix = prefix ? `${prefix} > ${part}` : part;
+      paths?.set(item, prefix);
+    }
+    return prefix;
+  }
+  private pathPart(element: Element): string {
+    let part = CSS.escape(element.localName || element.nodeName.toLowerCase());
+    const container: Node | null = element.parentElement || element.parentNode;
+    const currentName = element.localName;
+    if (isParentNode(container) && container.children) {
+      let count = 0,
+        position = 0;
+      const siblings = container.children;
+      for (let index = 0; index < siblings.length; index++) {
+        const sibling = siblings[index];
+        if (!sibling || sibling.localName !== currentName) continue;
+        count++;
+        if (sibling === element) position = count;
+      }
+      if (count > 1) part += `:nth-of-type(${position})`;
+    }
+    return part;
   }
   shadowPath(node: Node | null | undefined): (string | null)[] {
     const path: (string | null)[] = [];
@@ -89,6 +138,15 @@ export class NodeRegistry {
     return path;
   }
   scope(node: Node | null | undefined): Scope {
+    const cache = this.cache;
+    if (!node || !cache) return this.computeScope(node);
+    const known = cache.scopes.get(node);
+    if (known) return known;
+    const value = this.computeScope(node);
+    cache.scopes.set(node, value);
+    return value;
+  }
+  private computeScope(node: Node | null | undefined): Scope {
     const doc = isDocument(node) ? node : node?.ownerDocument || document;
     const framePath: Scope["framePath"] = [],
       frameContexts: Scope["frameContexts"] = [];

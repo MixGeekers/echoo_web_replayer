@@ -386,6 +386,10 @@ export function createAnnotationsUI(api: CollectorAPI, options: Options) {
       const items = annotationsFor(event.seq);
       const covered = set?.annotations.some((item) => item.endSeq !== null && event.seq > item.seq && event.seq <= item.endSeq);
       button.classList.toggle("in-annotation-range", Boolean(covered));
+      // Rows are reused across renders, so clear any previous decoration first.
+      button.querySelectorAll(".annotation-flag, .event-annotation").forEach((item) => item.remove());
+      button.classList.remove("annotated");
+      delete button.dataset.annotated;
       if (!items.length) return;
       button.classList.add("annotated");
       button.dataset.annotated = String(items.length);

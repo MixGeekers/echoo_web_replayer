@@ -15,6 +15,8 @@ interface Options {
   appVersion: string;
   profile: () => {id: string; name: string};
   notify: () => void;
+  /** 低频的完整状态推送；逐事件的计数通过 publish 的 counters 增量送达。 */
+  notifyLater?: () => void;
   reportError: (error: unknown) => void;
   publish: (event: EventNotice) => void;
 }
@@ -26,6 +28,7 @@ export function createRecordingController({
   appVersion,
   profile,
   notify,
+  notifyLater = notify,
   reportError,
   publish,
 }: Options) {
@@ -71,6 +74,7 @@ export function createRecordingController({
       payload,
       ...extra,
     });
+    const metadata = store.sessions.get(event.sessionId);
     publish({
       id: event.id,
       seq: event.seq,
@@ -78,8 +82,22 @@ export function createRecordingController({
       timestamp: event.timestamp,
       elapsedMs: event.elapsedMs,
       sessionId: event.sessionId,
+      ...(metadata
+        ? {
+            counters: {
+              eventCount: metadata.eventCount,
+              actionCount: metadata.actionCount,
+              mutationCount: metadata.mutationCount,
+              snapshotCount: metadata.snapshotCount,
+              lastSeq: metadata.lastSeq,
+              lastElapsedMs: metadata.lastElapsedMs,
+              updatedAt: metadata.updatedAt,
+              url: metadata.url,
+            },
+          }
+        : {}),
     });
-    notify();
+    notifyLater();
     return event;
   }
   function append<K extends keyof ApplicationPayloadMap>(

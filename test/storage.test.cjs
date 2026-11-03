@@ -134,3 +134,46 @@ test('failed export preserves an existing destination and cleans temporary data'
   assert.equal(await fs.readFile(destination, 'utf8'), 'original file');
   assert.equal((await fs.readdir(directory)).filter(name => name.startsWith('.tracedock-export-')).length, 0);
 });
+
+test('queued appends are written as one batch, stay ordered and flush metadata', async t => {
+  const { store } = await setup(t);
+  const session = await store.create('合并写入', 'https://example.test', { id: 'profile-00000000-0000-4000-8000-000000000001', name: '测试环境' }, 'group-00000000-0000-4000-8000-000000000001');
+  const directory = store.getSessionDirectory(session.id);
+  const original = fs.appendFile;
+  const writes = [];
+  fs.appendFile = async (file, ...rest) => { writes.push(path.basename(file)); return original(file, ...rest); };
+  t.after(() => { fs.appendFile = original; });
+  // 先占住队列，后续追加会合并成同一批。
+  const blocker = store.update(session.id, { name: '合并写入' });
+  const appends = Array.from({ length: 50 }, (_, index) => store.append(session.id, {
+    type: index % 2 ? 'dom.mutation' : 'action.click',
+    url: index === 49 ? 'https://example.test/last' : undefined,
+    payload: { index },
+  }));
+  const invalid = assert.rejects(store.append(session.id, { type: '' }), /事件类型不能为空/);
+  appends.push(store.append(session.id, { type: 'action.input', payload: { index: 50 } }));
+  await blocker;
+  const events = await Promise.all(appends);
+  await invalid;
+  fs.appendFile = original;
+  assert.deepEqual(events.map(event => event.seq), Array.from({ length: 51 }, (_, index) => index + 1));
+  assert.deepEqual(events.map(event => event.payload.index), Array.from({ length: 51 }, (_, index) => index));
+  assert.equal(events[50].url, 'https://example.test/last');
+  assert.deepEqual(writes.sort(), ['timeline.idx', 'timeline.jsonl', 'timeline.summaries.jsonl']);
+  const page = await store.timeline({ sessionId: session.id, limit: 100 });
+  assert.equal(page.total, 51);
+  assert.deepEqual(page.events.map(event => event.seq).sort((a, b) => a - b), events.map(event => event.seq));
+  assert.equal(store.getSession(session.id).actionCount, 26);
+  assert.equal(store.getSession(session.id).mutationCount, 25);
+  await store.flush();
+  const onDisk = JSON.parse(await fs.readFile(path.join(directory, 'session.json'), 'utf8'));
+  assert.equal(onDisk.eventCount, 51);
+  assert.equal(onDisk.lastSeq, 51);
+  assert.equal(onDisk.url, 'https://example.test/last');
+  const restarted = await new SessionStore(store.rootDir).init();
+  assert.equal(restarted.getSession(session.id).eventCount, 52);
+  const replayed = await restarted.timeline({ sessionId: session.id, limit: 100 });
+  const restoredIndexes = replayed.events.filter(event => event.seq <= 51).sort((a, b) => a.seq - b.seq).map(event => event.type);
+  assert.deepEqual(restoredIndexes, events.map(event => event.type));
+  assert.equal((await restarted.getEvent(session.id, events[49].id)).payload.index, 49);
+});
