@@ -179,8 +179,14 @@ export function createMCPUI(api: CollectorAPI, options: Options) {
     el("mcp-status-button", "button").textContent = pending.length ? `${pending.length} 项连接 / 控制请求待确认` : !current?.enabled ? "本地 MCP 未开启" : connected.length ? `${connected.length} 个 Agent 已连接${control ? ` · ${clientName(control.connectionId)}` : " · 网页由你操作"}` : "等待 Agent 连接";
     el("mcp-status-button", "button").classList.toggle("has-request", pending.length > 0);
     el("mcp-capture-label", "span").textContent = running ? `${captureOwner ? "Agent" : "人工"}采集${capture.status === "paused" ? "已暂停" : "中"}` : "";
+    const strip = el("mcp-collaboration", "section");
+    strip.classList.toggle("capturing", Boolean(running) && capture?.status === "recording");
+    strip.classList.toggle("capture-paused", Boolean(running) && capture?.status === "paused");
+    strip.classList.toggle("agent-capture", Boolean(running && captureOwner));
     el("mcp-target-label", "span").textContent = control ? `${profileName(control.profileId)}${control.status === "reserved" ? " · 待打开环境" : currentGroup ? ` / ${currentGroup.name}` : ""}` : [activeName, currentGroup?.name].filter(Boolean).join(" / ");
     el("mcp-target-label", "span").title = el("mcp-target-label", "span").textContent || "";
+    // 顶栏空间有限：窄窗口下目标与连接说明可能被隐藏或截断，悬停徽标可看到完整状态。
+    strip.title = [el("mcp-operator-label", "strong").textContent, el("mcp-capture-label", "span").textContent, el("mcp-status-button", "button").textContent, el("mcp-target-label", "span").textContent].filter(Boolean).join(" · ");
     el("mcp-takeover-button", "button").hidden = !control;
     el("mcp-takeover-button", "button").disabled = busy;
     el("mcp-entry-label", "span").textContent = connected.length ? `Agent 连接 · ${connected.length}` : "Agent 连接";
