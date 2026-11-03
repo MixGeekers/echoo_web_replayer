@@ -29,12 +29,18 @@ export function createRecordingController({
   reportError,
   publish,
 }: Options) {
+  const wc = browser.webContents;
   let activeId: string | null = null;
   let commandQueue: Promise<unknown> = Promise.resolve();
   const pendingCommands = new Map<
     string,
     { resolve: () => void; reject: (error: Error) => void }
   >();
+  wc.once("destroyed", () => {
+    for (const pending of pendingCommands.values())
+      pending.reject(new Error("浏览页面已关闭，采集命令未完成"));
+    pendingCommands.clear();
+  });
   function requireActiveId(): string {
     if (!activeId) throw new Error("当前没有录制会话");
     return activeId;
@@ -84,11 +90,10 @@ export function createRecordingController({
     return persist(type, payload, extra);
   }
   function sendRecorderState() {
-    if (browser && !browser.webContents.isDestroyed())
-      browser.webContents.send("recorder:state", recordingState());
+    if (!wc.isDestroyed()) wc.send("recorder:state", recordingState());
   }
   async function recorderCommand(command: string, reason: string) {
-    if (!browser || browser.webContents.isDestroyed())
+    if (wc.isDestroyed())
       throw new Error("浏览器尚未就绪");
     const requestId = randomUUID();
     await new Promise<void>((resolve, reject) => {
@@ -106,7 +111,7 @@ export function createRecordingController({
           reject(error);
         },
       });
-      browser.webContents.send("recorder:command", {
+      wc.send("recorder:command", {
         command,
         reason,
         requestId,
@@ -179,8 +184,16 @@ export function createRecordingController({
     if (!session || !["recording", "paused"].includes(session.status))
       return session;
     if (session.status === "recording") {
-      await checkpoint("snapshot", "stop");
-      await checkpoint("stop", "stop");
+      if (wc.isDestroyed()) {
+        await append("recorder.error", {
+          message: "浏览页面已关闭，无法获取结束快照；此前收到的事件已保留。",
+          reason,
+          possibleGap: true,
+        });
+      } else {
+        await checkpoint("snapshot", "stop");
+        await checkpoint("stop", "stop");
+      }
     }
     await resources.stop();
     await append("session.stop", { reason });

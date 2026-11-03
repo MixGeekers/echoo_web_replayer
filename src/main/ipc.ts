@@ -37,9 +37,11 @@ export function installIPC({win,workspace,demoURL,mcp,mcpConfig}: Options) {
     )
       throw new Error("拒绝非应用界面的请求");
   }
-  const recorderCaller = (event: IpcMainEvent | IpcMainInvokeEvent) =>
-    event.sender === workspace.runtime()?.browser.webContents &&
-    event.senderFrame === workspace.runtime()?.browser.webContents.mainFrame;
+  const recorderCaller = (event: IpcMainEvent | IpcMainInvokeEvent) => {
+    const contents = workspace.runtime()?.browser.webContents;
+    return Boolean(contents && !contents.isDestroyed() &&
+      event.sender === contents && event.senderFrame === contents.mainFrame);
+  };
   function handle<K extends InvokeChannel>(
     name: K,
     handler: (input: unknown) => InvokeResult<K> | Promise<InvokeResult<K>>,

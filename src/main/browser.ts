@@ -18,6 +18,9 @@ export function createBrowserController({
   reportError,
   record,
 }: Options) {
+  // WebContentsView.webContents becomes undefined after the page closes itself.
+  // Keep the original handle so lifecycle checks remain safe after destruction.
+  const wc = browser.webContents;
   function normalizeURL(input: unknown) {
     const raw = String(input || "").trim();
     if (raw === demoURL || raw === "tracedock://demo" || raw === "demo")
@@ -38,13 +41,14 @@ export function createBrowserController({
     return url.href;
   }
   async function navigate(input: unknown) {
+    if (wc.isDestroyed()) throw new Error("浏览环境正在恢复，请稍后重试");
     const url = normalizeURL(input);
     browserState.error = null;
     browserState.url = url;
     notify();
     // Navigation resolves after the load. Return promptly so a slow site cannot lock the controls.
-    browser.webContents.loadURL(url).catch((error) => {
-      if (errorCode(error) !== "ERR_ABORTED") {
+    wc.loadURL(url).catch((error) => {
+      if (!wc.isDestroyed() && errorCode(error) !== "ERR_ABORTED") {
         browserState.error = errorMessage(error);
         notify();
       }
@@ -52,8 +56,8 @@ export function createBrowserController({
     return { url };
   }
   function browserEvents() {
-    const wc = browser.webContents;
     const refresh = () => {
+      if (wc.isDestroyed()) return;
       browserState.canGoBack = wc.navigationHistory.canGoBack();
       browserState.canGoForward = wc.navigationHistory.canGoForward();
       notify();

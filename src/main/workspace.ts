@@ -30,6 +30,7 @@ interface MCPHooks {
 
 type Runtime = {
   profileId: string;
+  disposing: boolean;
   browser: WebContentsView;
   resources: ResourceRecorder;
   recording: ReturnType<typeof createRecordingController>;
@@ -86,6 +87,8 @@ export async function createWorkspace(win: BrowserWindow, demoURL: string) {
   }
   function requireRuntime(): Runtime {
     if (!runtime) throw new Error("请先打开一个 Profile");
+    if (!runtime.browser.webContents || runtime.browser.webContents.isDestroyed())
+      throw new Error("浏览环境正在恢复，请稍后重试");
     return runtime;
   }
   const notify = () => {
@@ -119,12 +122,18 @@ export async function createWorkspace(win: BrowserWindow, demoURL: string) {
     if(invalidate)mcp?.environmentChanging(null);
     const old = runtime;
     if (old) {
-      await old.recording.stopSession(reason);
-      await store.flush();
-      await old.resources.close();
-      win.contentView.removeChildView(old.browser);
-      if (!old.browser.webContents.isDestroyed()) old.browser.webContents.close();
-      runtime = null;
+      old.disposing = true;
+      try {
+        await old.recording.stopSession(reason);
+        await store.flush();
+        await old.resources.close();
+        win.contentView.removeChildView(old.browser);
+        const contents = old.browser.webContents;
+        if (contents && !contents.isDestroyed()) contents.close();
+        runtime = null;
+      } finally {
+        old.disposing = false;
+      }
     }
     await profiles.select(null);
     browserState = {available:false,url:"",title:"未打开 Profile",loading:false,canGoBack:false,canGoForward:false,error:null};
@@ -157,7 +166,25 @@ export async function createWorkspace(win: BrowserWindow, demoURL: string) {
       record:(type,payload)=>{
         if(recording.currentSession()?.status === "recording") recording.append(type,payload).catch(reportError);
       }});
-    runtime = {profileId:id,browser,resources,recording,navigation};
+    const current: Runtime = {profileId:id,disposing:false,browser,resources,recording,navigation};
+    runtime = current;
+    browser.webContents.once("destroyed", () => {
+      if (runtime !== current || current.disposing || closing) return;
+      browserState.available = false;
+      browserState.loading = false;
+      browserState.canGoBack = false;
+      browserState.canGoForward = false;
+      mcp?.environmentChanging(null);
+      notify();
+      // A website can close its own WebContents. Save the recording before
+      // replacing that view, and never replay the site's last URL or form request.
+      void serialize(async () => {
+        if (runtime !== current || current.disposing || closing) return;
+        await closeEnvironment("browser-closed", false);
+        await openEnvironment(id);
+        reportError(new Error("网页关闭了浏览窗口，已重新打开当前环境。已有采集记录已保留，可重新输入网址继续使用。"));
+      }).catch(reportError);
+    });
     setBounds(bounds);
     try {
       await browser.webContents.loadURL("about:blank");
@@ -338,7 +365,8 @@ export async function createWorkspace(win: BrowserWindow, demoURL: string) {
       await serialize(async()=>{
         const old=runtime;
         if(old){await old.recording.stopSession("window-close");await store.flush();await old.resources.close();
-          if(!old.browser.webContents.isDestroyed())old.browser.webContents.close();runtime=null;}
+          const contents=old.browser.webContents;
+          if(contents&&!contents.isDestroyed())contents.close();runtime=null;}
       });
       await exportClosing;
       await store.flush();clearTimeout(timer);

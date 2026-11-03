@@ -20,6 +20,7 @@ npm run typecheck        # TS7 严格类型及契约检查
 npm test                 # 构建后运行存储、导出、采集器及回放核心回归
 npm run test:smoke       # 启动真实 Electron 应用进行流程验证
 npm run test:lifecycle   # Profile 隔离、Session 层级与归档、回收站、删除的真实桌面验收
+npm run test:navigation  # 地址栏、前进后退、网页关闭后的浏览环境与采集恢复
 npm run test:library     # 混合批量整理、整批预检、占用保护及删除持久化验收
 npm run test:mcp         # 实际 stdio 客户端、授权、多读一写与两条协作流程验收
 npm run test:mcp-browser # 原生网页动作、引用失效、iframe、Shadow DOM 与接管中断
@@ -48,6 +49,8 @@ node scripts/large-recording.cjs # 大记录流式导出、恢复及内存验收
 6. 将 ZIP 提交给 Agent，要求先阅读包内 `AGENT_README.md`。差分包先使用随附 `restore.py` 恢复并验证，再结合时间线和快照分析。完整包可直接解压阅读。导出后可从应用打开所在文件夹。
 
 地址栏提供后退、前进、刷新和返回演示页。网页请求打开新窗口时，会在当前内嵌浏览器中加载。
+
+如果网页脚本关闭了内嵌浏览窗口，工作台会结束并保存当前采集，在时间线标记可能缺失的结束快照，并重新打开同一 Profile 的演示页。原有登录环境与采集记录保留，可重新输入网址、开始新采集；不会自动重放关闭前的网址或表单请求。
 
 ## Profile、Session 与采集记录生命周期（新基线）
 
