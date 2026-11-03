@@ -74,54 +74,58 @@ export class SnapshotCapture {
     try {
       this.roots.discover(document, false);
       this.flush();
-      const main = this.document(document),
-        frames: DocumentSnapshot[] = [],
-        shadowRoots: SnapshotPayload["shadowRoots"] = [],
-        inaccessibleFrames: SnapshotPayload["inaccessibleFrames"] = [];
-      const { nodes } = this.context;
-      for (const root of this.roots.observed.keys()) {
-        if (!this.roots.attached(root)) continue;
-        if (isDocument(root) && root !== document)
-          frames.push(this.document(root));
-        if (isShadowRoot(root))
-          shadowRoots.push({
-            nodeId: nodes.id(root),
-            host: nodes.describe(root.host),
-            html: root.innerHTML,
-            forms: nodes.forms(root),
-          });
-      }
-      for (const root of this.roots.observed.keys()) {
-        if (!this.roots.attached(root)) continue;
-        for (const frame of root.querySelectorAll("iframe, frame")) {
-          try {
-            if (!isFrame(frame) || !frame.contentDocument?.documentElement)
-              inaccessibleFrames.push({
-                target: nodes.describe(frame),
-                src: frame.getAttribute("src"),
-                reason: "cross-origin, sandboxed, or not yet loaded",
-              });
-          } catch {
-            inaccessibleFrames.push({
-              target: nodes.describe(frame),
-              src: frame.getAttribute("src"),
-              reason: "cross-origin or sandboxed",
-            });
-          }
-        }
-      }
-      this.context.send("dom.snapshot", {
-        reason,
-        ...main,
-        frames,
-        shadowRoots,
-        inaccessibleFrames,
-        coverage,
-      });
+      const payload = this.context.nodes.withCache(() => this.build(reason));
+      this.context.send("dom.snapshot", payload);
       return { ok: true };
     } catch (error) {
       this.context.report("snapshot", error);
       return { ok: false, error: errorMessage(error) };
     }
+  }
+  private build(reason: string) {
+    const main = this.document(document),
+      frames: DocumentSnapshot[] = [],
+      shadowRoots: SnapshotPayload["shadowRoots"] = [],
+      inaccessibleFrames: SnapshotPayload["inaccessibleFrames"] = [];
+    const { nodes } = this.context;
+    for (const root of this.roots.observed.keys()) {
+      if (!this.roots.attached(root)) continue;
+      if (isDocument(root) && root !== document)
+        frames.push(this.document(root));
+      if (isShadowRoot(root))
+        shadowRoots.push({
+          nodeId: nodes.id(root),
+          host: nodes.describe(root.host),
+          html: root.innerHTML,
+          forms: nodes.forms(root),
+        });
+    }
+    for (const root of this.roots.observed.keys()) {
+      if (!this.roots.attached(root)) continue;
+      for (const frame of root.querySelectorAll("iframe, frame")) {
+        try {
+          if (!isFrame(frame) || !frame.contentDocument?.documentElement)
+            inaccessibleFrames.push({
+              target: nodes.describe(frame),
+              src: frame.getAttribute("src"),
+              reason: "cross-origin, sandboxed, or not yet loaded",
+            });
+        } catch {
+          inaccessibleFrames.push({
+            target: nodes.describe(frame),
+            src: frame.getAttribute("src"),
+            reason: "cross-origin or sandboxed",
+          });
+        }
+      }
+    }
+    return {
+      reason,
+      ...main,
+      frames,
+      shadowRoots,
+      inaccessibleFrames,
+      coverage,
+    };
   }
 }

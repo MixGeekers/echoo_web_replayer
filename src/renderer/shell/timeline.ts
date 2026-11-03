@@ -131,6 +131,45 @@ export function createTimeline(
     return empty;
   }
 
+  // 行节点按事件复用：实时刷新只创建新增事件的行，已有行仅调整顺序和选中状态。
+  const rows = new Map<string, { event: EventPreview; button: HTMLButtonElement }>();
+  const eventsById = new Map<string, EventPreview>();
+  const rowKey = (event: EventPreview) => event.id ?? `seq:${event.seq}`;
+  function buildRow(event: EventPreview): HTMLButtonElement {
+    const [label, iconName, category] = eventPresentation(event);
+    const summaryText = escapeText(eventSummary(event), 500);
+    const button = document.createElement("button");
+    button.className = "timeline-event";
+    button.dataset.eventId = rowKey(event);
+    button.setAttribute(
+      "aria-label",
+      `${label} ${formatTime(event.timestamp)} ${summaryText}`,
+    );
+    const icon = document.createElement("span");
+    icon.className = `event-icon ${category}`;
+    icon.innerHTML = svg(iconName);
+    const body = document.createElement("span");
+    body.className = "event-body";
+    const first = document.createElement("span");
+    first.className = "event-first-line";
+    const name = document.createElement("span");
+    name.className = "event-name";
+    name.textContent = label;
+    const time = document.createElement("span");
+    time.className = "event-time";
+    time.textContent = formatTime(event.timestamp);
+    first.append(name, time);
+    const summary = document.createElement("span");
+    summary.className = "event-summary";
+    summary.textContent = summaryText;
+    summary.title = summaryText;
+    const seq = document.createElement("span");
+    seq.className = "event-seq";
+    seq.textContent = `#${String(event.seq ?? "").padStart(4, "0")} · ${event.type}`;
+    body.append(first, summary, seq);
+    button.append(icon, body);
+    return button;
+  }
   function renderTimeline() {
     const list = el("timeline-list", "div");
     const previousScroll = list.scrollTop;
@@ -139,40 +178,19 @@ export function createTimeline(
       fragment.append(
         renderEmpty(search || filter !== "all" ? "filter" : "empty"),
       );
-    events.forEach((event) => {
-      const [label, iconName, category] = eventPresentation(event);
-      const button = document.createElement("button");
-      button.className = `timeline-event${event.id === selectedEventId ? " selected" : ""}`;
-      button.setAttribute(
-        "aria-label",
-        `${label} ${formatTime(event.timestamp)} ${escapeText(eventSummary(event))}`,
-      );
-      const icon = document.createElement("span");
-      icon.className = `event-icon ${category}`;
-      icon.innerHTML = svg(iconName);
-      const body = document.createElement("span");
-      body.className = "event-body";
-      const first = document.createElement("span");
-      first.className = "event-first-line";
-      const name = document.createElement("span");
-      name.className = "event-name";
-      name.textContent = label;
-      const time = document.createElement("span");
-      time.className = "event-time";
-      time.textContent = formatTime(event.timestamp);
-      first.append(name, time);
-      const summary = document.createElement("span");
-      summary.className = "event-summary";
-      summary.textContent = escapeText(eventSummary(event), 500);
-      summary.title = escapeText(eventSummary(event), 500);
-      const seq = document.createElement("span");
-      seq.className = "event-seq";
-      seq.textContent = `#${String(event.seq ?? "").padStart(4, "0")} · ${event.type}`;
-      body.append(first, summary, seq);
-      button.append(icon, body);
-      button.addEventListener("click", () => inspectEvent(event));
-      fragment.append(button);
-    });
+    eventsById.clear();
+    for (const event of events) {
+      const key = rowKey(event);
+      eventsById.set(key, event);
+      let row = rows.get(key);
+      if (!row || row.event !== event) {
+        row = { event, button: buildRow(event) };
+        rows.set(key, row);
+      }
+      row.button.classList.toggle("selected", event.id === selectedEventId);
+      fragment.append(row.button);
+    }
+    for (const id of rows.keys()) if (!eventsById.has(id)) rows.delete(id);
     list.replaceChildren(fragment);
     if (!follow || previousScroll > 10) list.scrollTop = previousScroll;
     el("timeline-count", "span").textContent = String(
@@ -380,6 +398,13 @@ export function createTimeline(
     }, 200);
   });
   el("load-more-button", "button").addEventListener("click", loadEarlier);
+  el("timeline-list", "div").addEventListener("click", (domEvent) => {
+    const target = domEvent.target;
+    if (!(target instanceof Element)) return;
+    const id = target.closest<HTMLElement>(".timeline-event")?.dataset.eventId;
+    const event = id ? eventsById.get(id) : undefined;
+    if (event) void inspectEvent(event);
+  });
   el("close-detail-button", "button").addEventListener("click", () => {
     selectedEventId = null;
     el("event-detail", "div").hidden = true;

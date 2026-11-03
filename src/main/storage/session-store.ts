@@ -32,6 +32,23 @@ import {
   writeAll,
   hasFollowingLine,
 } from "./index";
+interface AppendRequest {
+  id: string;
+  event: EventInput;
+  resolve(event: StoredEvent): void;
+  reject(error: unknown): void;
+}
+interface PreparedEvent {
+  request: AppendRequest;
+  event: StoredEvent;
+  raw: Buffer;
+  body: Buffer;
+  category: number;
+}
+/** 录制期间 session.json 中的计数只用于展示；重启时由时间线重建，因此可以延迟合并写入。 */
+const METADATA_DELAY_MS = 1000;
+/** 单次合并写入的时间线字节上限，避免多个大快照拼接时占用过多内存。 */
+const BATCH_BYTES = 4 * 1024 * 1024;
 export class SessionStore {
   readonly rootDir: string;
   readonly sessions = new Map<string, SessionMetadata>();
@@ -40,11 +57,17 @@ export class SessionStore {
   private reader = new TimelineReader(this);
   private readers = new Map<string, number>();
   private libraryMutations = new Set<string>();
+  /** 仍在队尾、尚未开始执行的追加批次；新事件可以并入其中，一次写入。 */
+  private openBatch: AppendRequest[] | null = null;
+  private metadataTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private metadataDirty = new Set<string>();
   constructor(rootDir: string) {
     this.rootDir = path.resolve(rootDir);
     this.queue = Promise.resolve();
   }
   _enqueue<T>(operation: () => T | Promise<T>): Promise<T> {
+    // 其他操作排在批次之后时，后来的事件不能再并入之前的批次，否则会越过该操作。
+    this.openBatch = null;
     const task = this.queue.then(operation);
     this.queue = task.catch(() => {});
     return task;
@@ -73,6 +96,8 @@ export class SessionStore {
     };
   }
   async _writeMetadata(metadata: SessionMetadata) {
+    // 调用方总是传入内存中最新的元数据，写入后不再需要延迟写。
+    this._cancelMetadata(metadata.id);
     const filename = path.join(
         this.getSessionDirectory(metadata.id),
         "session.json",
@@ -256,6 +281,8 @@ export class SessionStore {
             recoveryFile: metadata.recoveryFile || null,
           },
         });
+        // 立即落盘 interrupted 状态，避免再次异常退出时重复标记。
+        await this._writeMetadata(this._known(metadata.id));
       } else await this._writeMetadata(metadata);
     }
     return this;
@@ -315,8 +342,24 @@ export class SessionStore {
       return { ...metadata };
     });
   }
-  append(id: string, event: EventInput) {
-    return this._enqueue(() => this._append(id, event));
+  /**
+   * 追加事件。排队期间到达的连续事件会合并为一批，每个文件只写一次；
+   * 每个调用仍在其事件写入后单独完成，顺序与调用顺序一致。
+   */
+  append(id: string, event: EventInput): Promise<StoredEvent> {
+    return new Promise<StoredEvent>((resolve, reject) => {
+      const request = { id, event, resolve, reject };
+      if (this.openBatch) {
+        this.openBatch.push(request);
+        return;
+      }
+      const batch: AppendRequest[] = [request];
+      this._enqueue(async () => {
+        if (this.openBatch === batch) this.openBatch = null;
+        await this._appendBatch(batch);
+      }).catch(() => {});
+      this.openBatch = batch;
+    });
   }
   saveResource(id: string, entry: ResourceEntry, source?: string) {
     return this._enqueue(async () => {
@@ -348,18 +391,74 @@ export class SessionStore {
     }
     return this.indexes.get(id)!;
   }
-  async _append(sessionId: string, input: EventInput): Promise<StoredEvent> {
-    await this._ensureIndex(sessionId);
+  _append(sessionId: string, input: EventInput): Promise<StoredEvent> {
+    return new Promise<StoredEvent>((resolve, reject) =>
+      void this._appendRun([{ id: sessionId, event: input, resolve, reject }]),
+    );
+  }
+  private async _appendBatch(batch: AppendRequest[]) {
+    for (let start = 0; start < batch.length; ) {
+      let end = start + 1;
+      while (end < batch.length && batch[end]!.id === batch[start]!.id) end++;
+      await this._appendRun(batch.slice(start, end));
+      start = end;
+    }
+  }
+  /** 写入同一记录的一组连续事件。每个请求都会被 resolve 或 reject，本方法不抛出。 */
+  private async _appendRun(requests: AppendRequest[]) {
+    const sessionId = requests[0]!.id;
+    try {
+      await this._ensureIndex(sessionId);
+    } catch (error) {
+      for (const request of requests) request.reject(error);
+      return;
+    }
+    let chunk: PreparedEvent[] = [],
+      chunkBytes = 0;
+    for (let at = 0; at < requests.length; at++) {
+      const request = requests[at]!;
+      let prepared: PreparedEvent;
+      try {
+        prepared = this._prepare(sessionId, request, chunk);
+      } catch (error) {
+        request.reject(error);
+        continue;
+      }
+      chunk.push(prepared);
+      chunkBytes += prepared.raw.length;
+      if (chunkBytes < BATCH_BYTES && at < requests.length - 1) continue;
+      try {
+        await this._commit(sessionId, chunk);
+      } catch (error) {
+        for (const item of chunk) item.request.reject(error);
+        for (const rest of requests.slice(at + 1)) rest.reject(error);
+        return;
+      }
+      chunk = [];
+      chunkBytes = 0;
+    }
+    if (chunk.length) {
+      try {
+        await this._commit(sessionId, chunk);
+      } catch (error) {
+        for (const item of chunk) item.request.reject(error);
+      }
+    }
+  }
+  /** 基于已提交状态和本批中排在前面的事件，计算下一个事件。 */
+  private _prepare(sessionId: string, request: AppendRequest, pending: PreparedEvent[]): PreparedEvent {
     const metadata = this._known(sessionId),
-      index = this.indexes.get(sessionId)!,
-      files = this._paths(sessionId);
+      input = request.event;
     if (!input || typeof input.type !== "string" || !input.type)
       throw new Error("事件类型不能为空");
+    const previous = pending.at(-1)?.event;
+    const lastSeq = previous?.seq ?? metadata.lastSeq,
+      lastElapsedMs = previous?.elapsedMs ?? metadata.lastElapsedMs;
     const receivedAt = new Date().toISOString(),
       timestamp = Number.isFinite(Date.parse(input.timestamp ?? ""))
         ? new Date(input.timestamp!).toISOString()
         : receivedAt,
-      seq = metadata.lastSeq + 1;
+      seq = lastSeq + 1;
     const event: StoredEvent = {
       ...input,
       summary: input.summary || "",
@@ -370,56 +469,116 @@ export class SessionStore {
       timestamp,
       receivedAt,
       elapsedMs: Math.max(
-        metadata.lastElapsedMs || 0,
+        lastElapsedMs || 0,
         Date.parse(receivedAt) - Date.parse(metadata.startedAt),
         0,
       ),
-      url: input.url || metadata.url || "",
+      url: input.url || previous?.url || metadata.url || "",
       title: input.title || "",
       documentId: input.documentId || null,
       payload: input.payload ?? {},
     };
     event.summary = summarize(event);
-    const raw = Buffer.from(`${JSON.stringify(event)}\n`),
-      body = Buffer.from(`${JSON.stringify(compactEvent(event))}\n`);
-    const row = {
-      seq,
-      offset: index.bytes,
-      length: raw.length,
-      summaryOffset: index.summaryBytes,
-      summaryLength: body.length,
+    return {
+      request,
+      event,
+      raw: Buffer.from(`${JSON.stringify(event)}\n`),
+      body: Buffer.from(`${JSON.stringify(compactEvent(event))}\n`),
       category: category(event.type),
-      elapsedMs: event.elapsedMs,
     };
-    await fs.appendFile(files.timeline, raw);
-    const updated = {
-      ...metadata,
-      lastSeq: seq,
-      lastElapsedMs: event.elapsedMs,
-      eventCount: metadata.eventCount + 1,
-      actionCount: metadata.actionCount + Number(row.category === 1),
-      mutationCount: metadata.mutationCount + Number(row.category === 2),
-      snapshotCount: metadata.snapshotCount + Number(row.category === 3),
-      updatedAt: receivedAt,
-      url: event.url || metadata.url,
-    };
-    this.sessions.set(sessionId, updated);
+  }
+  /** 三个文件各写一次；任一写入失败都标记索引待重建，以时间线文件为准恢复。 */
+  private async _commit(sessionId: string, items: PreparedEvent[]) {
+    const metadata = this._known(sessionId),
+      index = this.indexes.get(sessionId)!,
+      files = this._paths(sessionId);
+    const rows: Buffer[] = [];
+    let offset = index.bytes,
+      summaryOffset = index.summaryBytes;
+    const counts = [0, 0, 0, 0];
+    for (const item of items) {
+      rows.push(
+        encodeRow({
+          seq: item.event.seq,
+          offset,
+          length: item.raw.length,
+          summaryOffset,
+          summaryLength: item.body.length,
+          category: item.category,
+          elapsedMs: item.event.elapsedMs,
+        }),
+      );
+      offset += item.raw.length;
+      summaryOffset += item.body.length;
+      if (item.category >= 1 && item.category <= 3) counts[item.category]!++;
+    }
+    const last = items.at(-1)!.event;
     try {
-      await fs.appendFile(files.summaries, body);
-      await fs.appendFile(files.index, encodeRow(row));
-      index.count++;
-      index.bytes += raw.length;
-      index.summaryBytes += body.length;
-      index.categories[row.category] =
-        (index.categories[row.category] ?? 0) + 1;
-      index.lastSeq = seq;
-      index.lastElapsedMs = event.elapsedMs;
+      await fs.appendFile(
+        files.timeline,
+        items.length === 1 ? items[0]!.raw : Buffer.concat(items.map((item) => item.raw)),
+      );
     } catch (error) {
       index.dirty = true;
       throw error;
     }
-    await this._writeMetadata(updated);
-    return event;
+    this.sessions.set(sessionId, {
+      ...metadata,
+      lastSeq: last.seq,
+      lastElapsedMs: last.elapsedMs,
+      eventCount: metadata.eventCount + items.length,
+      actionCount: metadata.actionCount + counts[1]!,
+      mutationCount: metadata.mutationCount + counts[2]!,
+      snapshotCount: metadata.snapshotCount + counts[3]!,
+      updatedAt: last.receivedAt,
+      url: last.url || metadata.url,
+    });
+    try {
+      await fs.appendFile(files.summaries, Buffer.concat(items.map((item) => item.body)));
+      await fs.appendFile(files.index, Buffer.concat(rows));
+      for (const item of items) {
+        index.categories[item.category] = (index.categories[item.category] ?? 0) + 1;
+        index.count++;
+      }
+      index.bytes = offset;
+      index.summaryBytes = summaryOffset;
+      index.lastSeq = last.seq;
+      index.lastElapsedMs = last.elapsedMs;
+    } catch (error) {
+      index.dirty = true;
+      this._scheduleMetadata(sessionId);
+      throw error;
+    }
+    this._scheduleMetadata(sessionId);
+    for (const item of items) item.request.resolve(item.event);
+  }
+  private _scheduleMetadata(id: string) {
+    this.metadataDirty.add(id);
+    if (this.metadataTimers.has(id)) return;
+    const timer = setTimeout(() => {
+      this.metadataTimers.delete(id);
+      this._enqueue(() => this._persistMetadata(id)).catch(() => {
+        /* 下次追加、flush 或状态更新会重试；计数在重启时由时间线重建。 */
+      });
+    }, METADATA_DELAY_MS);
+    timer.unref?.();
+    this.metadataTimers.set(id, timer);
+  }
+  private _cancelMetadata(id: string) {
+    clearTimeout(this.metadataTimers.get(id));
+    this.metadataTimers.delete(id);
+    this.metadataDirty.delete(id);
+  }
+  private async _persistMetadata(id: string) {
+    if (!this.metadataDirty.has(id)) return;
+    const metadata = this.sessions.get(id);
+    if (!metadata) return this._cancelMetadata(id);
+    try {
+      await this._writeMetadata(metadata);
+    } catch (error) {
+      this.metadataDirty.add(id);
+      throw error;
+    }
   }
   update(sessionId: string, patch: SessionPatch) {
     return this._enqueue(async () => {
@@ -523,6 +682,7 @@ export class SessionStore {
   private async deleteFiles(id: string) {
     if (this.readers.get(id)) throw new Error("记录正在读取，请稍后重试");
     await this.reader.invalidate(id);
+    this._cancelMetadata(id);
     const staging = path.join(this.rootDir, `.deleting-${id}-${randomUUID()}`);
     await fs.rename(this.getSessionDirectory(id), staging);
     this.sessions.delete(id);
@@ -562,8 +722,12 @@ export class SessionStore {
     try { return await operation(); }
     finally { await this._enqueue(() => { for (const id of selected) this.libraryMutations.delete(id); }); }
   }
-  flush() {
-    return this.queue;
+  /** 等待已排队的写入完成，并落盘延迟中的元数据。 */
+  flush(): Promise<void> {
+    return this._enqueue(async () => {
+      for (const id of [...this.metadataDirty])
+        await this._persistMetadata(id).catch(() => {});
+    }).catch(() => {});
   }
   capture(sessionId: string): Promise<SessionCapture> {
     return this._enqueue(async () => {

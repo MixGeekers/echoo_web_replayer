@@ -12,6 +12,9 @@ export class MutationCapture {
   ) {}
   collect(records: MutationRecord[]): void {
     if (!this.context.isRecording() || !records.length) return;
+    this.context.nodes.withCache(() => this.collectRecords(records));
+  }
+  private collectRecords(records: MutationRecord[]): void {
     const observedAt = new Date().toISOString(),
       laterValues = new Map<string, string | null>();
     const output: RecordedMutation[] = [];

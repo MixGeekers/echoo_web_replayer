@@ -209,16 +209,16 @@ scripts/                   构建、桌面验收、大记录和便携版验证
 
 工作台与被采集网页使用独立 WebContents。远程页面关闭 Node.js 集成，开启 sandbox、context isolation 和 web security；采集器不向网页主执行环境公开 IPC 接口。ZIP 中的字段和覆盖说明以 `AGENT_README.md` 为准。
 
-Agent 直接控制软件的 MCP / Playwright 接入已完成独立调研与隔离原型验证，方案见 `docs/agent-control-design.md`；0.2.0 尚未开放正式 Agent 控制接口。
+Agent 通过本地 MCP 读取记录库和控制内嵌浏览器，代码位于 `src/main/mcp/`，接入方式和工具清单见 [本地 MCP 使用说明](docs/local-mcp.md)，设计说明见 `docs/agent-control-design.md`。
 
 ## TypeScript 开发与验证
 
 `npm run typecheck` 分别检查主进程、preload/采集器、renderer/回放及类型契约。均开启 `strict`、`noUncheckedIndexedAccess` 和 `exactOptionalPropertyTypes`。类型不会替代 IPC 和磁盘数据的运行时校验；原始时间线与导出仍保留完整数据。
 
-`npm run compile` 生成全部入口和静态资源。`npm run verify` 依次执行类型检查、回归测试、真实桌面录制、离线回放、跨页面资源归属、后台导出和默认 1 GiB 大记录验收。macOS 可用 `TRACEDOCK_PYTHON=python3 PYTHON=python3 npm run verify`；Windows 安装 Python 并将 `python` 加入 PATH 后直接运行。
+`npm run compile` 生成全部入口和静态资源。`npm run verify` 依次执行类型检查、回归测试、真实桌面录制、生命周期、导航恢复、批量整理、MCP、离线回放、跨页面资源归属、后台导出和默认 1 GiB 大记录验收。macOS 可用 `TRACEDOCK_PYTHON=python3 PYTHON=python3 npm run verify`；Windows 安装 Python 并将 `python` 加入 PATH 后直接运行。
 
 `npm run build` 生成 Windows portable EXE；在 Windows 上继续执行 `npm run test:portable` 验证原生启动与重复启动。构建出的应用只使用 `out/` 下的 JS 和资源。测试夹具与验证脚本保留为 Node CJS，通过实际 JS 产物测试运行时行为；Python 恢复工具继续独立工作。
 
 模块边界及迁移验收见 `docs/typescript-migration.md`。
 
-[Windows CI](https://github.com/MixGeekers/echoo_web_replayer/actions/workflows/windows-verify.yml) 在 push、PR 和手动触发时执行完整验收、便携包构建及 Windows 原生运行测试。运行页面提供验收报告、截图和日志；全部通过后可下载该提交构建的 Windows 便携包。
+[Windows CI](https://github.com/MixGeekers/echoo_web_replayer/actions/workflows/windows-verify.yml) 分为四个并行 job：类型与单元检查、全部桌面验收（录制、生命周期、导航恢复、批量整理、MCP、回放、资源归属、后台导出）、便携包构建与原生运行测试，以及 1 GiB 大记录验收。前三个在每次 push 和 PR 时运行；大记录验收只在 main、每日定时任务和手动触发时运行。`scripts/check-ci-coverage.mjs` 会检查 `package.json` 中的每个测试脚本都已接入 CI 和 `npm run verify`。运行页面提供验收报告、截图和日志；全部通过后可下载该提交构建的 Windows 便携包。
