@@ -3,15 +3,22 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+  schedule:
+    # 每天 UTC 19:00（北京时间 03:00）运行一次完整验收，包括 1 GiB 大记录。
+    - cron: '0 19 * * *'
 permissions:
   contents: read
+concurrency:
+  group: windows-verify-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+env:
+  PYTHON: python
+  TRACEDOCK_PYTHON: python
 jobs:
-  windows:
+  checks:
+    name: Type and unit checks
     runs-on: windows-latest
-    timeout-minutes: 45
-    env:
-      PYTHON: python
-      TRACEDOCK_PYTHON: python
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.1.0
@@ -23,15 +30,48 @@ jobs:
           python-version: '3.12'
       - name: Install locked dependencies
         run: npm ci
+      - name: Check every test script is wired into CI
+        run: node scripts/check-ci-coverage.mjs
       - name: Check strict TypeScript contracts
         timeout-minutes: 3
         run: npm run typecheck
       - name: Run unit and integration regressions
         timeout-minutes: 5
         run: npm test
+
+  desktop:
+    name: Desktop acceptance
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Install locked dependencies
+        run: npm ci
       - name: Verify desktop recording and exports
         timeout-minutes: 5
         run: npm run test:smoke
+      - name: Verify Profile and Session lifecycle
+        timeout-minutes: 4
+        run: npm run test:lifecycle
+      - name: Verify navigation and page-close recovery
+        timeout-minutes: 4
+        run: npm run test:navigation
+      - name: Verify library batch operations
+        timeout-minutes: 4
+        run: npm run test:library
+      - name: Verify MCP desktop collaboration
+        timeout-minutes: 5
+        run: npm run test:mcp
+      - name: Verify MCP browser actions
+        timeout-minutes: 4
+        run: npm run test:mcp-browser
       - name: Verify offline replay
         timeout-minutes: 3
         run: npm run test:replay
@@ -41,31 +81,53 @@ jobs:
       - name: Verify background export cancellation
         timeout-minutes: 5
         run: npm run test:export-desktop
-      - name: Build Windows portable application
-        timeout-minutes: 10
-        run: npm run build -- --publish never
-      - name: Verify native portable application
-        timeout-minutes: 5
-        run: npm run test:portable
-      - name: Verify 1 GiB recording export and restoration
-        timeout-minutes: 25
-        run: npm run test:large
-      - name: Upload verification reports
+      - name: Upload desktop reports
         if: always()
         uses: actions/upload-artifact@v7.0.2
         with:
-          name: windows-verification-reports
+          name: windows-desktop-reports
           retention-days: 14
           if-no-files-found: warn
           path: |
             output/playwright/*.json
             output/playwright/*.png
             output/playwright/*.log
+            output/lifecycle-smoke-*/report.json
+            output/lifecycle-smoke-*/electron.log
+            output/navigation-smoke-*/report.json
+            output/navigation-smoke-*/electron.log
+            output/library-batch-smoke-*/report.json
+            output/library-batch-smoke-*/electron.log
+            output/mcp-desktop-smoke-*/report.json
+            output/mcp-desktop-smoke-*/qa-inventory.json
+            output/mcp-desktop-smoke-*/electron.log
+            output/mcp-browser-*/report.json
             output/replay-smoke-*/report.json
             output/replay-smoke-*/offline-replay.png
             output/resource-navigation-smoke-*/report.json
             output/export-desktop-*/summary.json
-            output/large-recording-*/report-*.json
+
+  package:
+    name: Portable build
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Build Windows portable application
+        timeout-minutes: 10
+        run: npm run build -- --publish never
+      - name: Verify native portable application
+        timeout-minutes: 5
+        run: npm run test:portable
       - name: Upload verified portable application
         uses: actions/upload-artifact@v7.0.2
         with:
@@ -73,3 +135,32 @@ jobs:
           retention-days: 7
           if-no-files-found: error
           path: dist/TraceDock-*-Windows-x64.exe
+
+  large:
+    name: 1 GiB recording export and restoration
+    # 大记录验收约 20 分钟，只在 main、定时任务和手动触发时运行，不阻塞功能分支的日常反馈。
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Verify 1 GiB recording export and restoration
+        timeout-minutes: 25
+        run: npm run test:large
+      - name: Upload large recording reports
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: windows-large-recording-reports
+          retention-days: 14
+          if-no-files-found: warn
+          path: output/large-recording-*/report-*.json
