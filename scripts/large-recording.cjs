@@ -183,7 +183,8 @@ async function exportFixture(directory, config) {
   const { exportSession } = require('../out/exporter.cjs');
   const fixture = JSON.parse(await fsp.readFile(path.join(directory, 'fixture.json'), 'utf8'));
   const metadata = JSON.parse(await fsp.readFile(path.join(fixture.sessionsRoot, sessionId, 'session.json'), 'utf8'));
-  const capture = { metadata, timelinePath: fixture.timelinePath, byteLength: fixture.timeline.bytes, capturedAt: new Date().toISOString() };
+  // 合成记录没有静态资源；资源截点字段仍是导出工作线程契约的必填项。
+  const capture = { metadata, timelinePath: fixture.timelinePath, byteLength: fixture.timeline.bytes, capturedAt: new Date().toISOString(), resourcePath: '', resourceBytes: 0 };
   const destination = path.join(directory, `${config.encoding}-${config.compression}.zip`);
   let lastProgress = 0;
   const result = await exportSession({ capture, sessionId, destination, encoding: config.encoding, compression: config.compression, appVersion: 'large-recording-acceptance',
