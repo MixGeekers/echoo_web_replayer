@@ -51,6 +51,18 @@ export interface BrowserBounds {
   height: number;
   visible: boolean;
 }
+/** 录制中每个事件附带的记录计数，界面据此局部更新，不必等待完整状态推送。 */
+export type SessionCounters = Pick<
+  SessionMetadata,
+  | "eventCount"
+  | "actionCount"
+  | "mutationCount"
+  | "snapshotCount"
+  | "lastSeq"
+  | "lastElapsedMs"
+  | "updatedAt"
+  | "url"
+>;
 export interface EventNotice {
   id: string;
   seq: number;
@@ -58,6 +70,7 @@ export interface EventNotice {
   timestamp: string;
   elapsedMs: number;
   sessionId: string;
+  counters?: SessionCounters;
 }
 export type EventDetail = DetailPreview | StoredEvent;
 export interface ExportOptions {
