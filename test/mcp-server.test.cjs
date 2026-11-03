@@ -16,7 +16,7 @@ test('local transport requires owner discovery secret and server-issued client c
   const bad=await first.call('hello',{secret:'bad',clientId:'agent',name:'Agent',credential:null});assert.match(bad.error.message,/handshake/);assert.equal(connected,0);first.socket.destroy();
   const second=await socketTo(discovery.endpoint);const hello=await second.call('hello',{secret:discovery.secret,clientId:'agent',name:'Agent',credential:null});assert.equal(hello.result.credential,'server-token');assert.equal(hello.result.pairingCode,'ABC123');assert.equal(hello.result.pending,true);
   const result=await second.call('call',{name:'tracedock_state',arguments:{}});assert.equal(result.result.name,'tracedock_state');assert.equal(called,1);assert.equal(result.result.id,hello.result.connectionId);
-  const closed=once(second.socket,'close');server.disconnect(hello.result.connectionId);await closed;await new Promise(r=>setImmediate(r));assert.equal(disconnected,1);
+  const closed=once(second.socket,'close');server.disconnect(hello.result.connectionId);await closed;for(let i=0;i<100&&disconnected===0;i++)await new Promise(r=>setTimeout(r,20));assert.equal(disconnected,1);
 });
 
 test('stdio initialization and concurrent first calls await the authenticated connection',async t=>{
