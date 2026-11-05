@@ -154,6 +154,125 @@ function fakeDebugger() {
   return debug;
 }
 
+function deferred() {
+  let resolve;
+  const promise = new Promise(done => { resolve = done; });
+  return { promise, resolve };
+}
+
+async function captureHarness(t) {
+  const debug = fakeDebugger(), events = [];
+  let recordingId = null;
+  const capture = await new NetworkCapture({ debugger: debug }, {
+    recordingId: () => recordingId,
+    record: (type, payload) => { events.push({ recordingId, type, payload }); },
+  }).init();
+  t.after(() => capture.close());
+  const emit = (method, params) => debug.emit('message', {}, method, params);
+  return {
+    capture, events,
+    start(id) { recordingId = id; capture.start(); },
+    async stop() { await capture.stop(); recordingId = null; },
+    request(id, extra = {}) { emit('Network.requestWillBeSent', requestParams({ requestId: id, ...extra })); },
+    finish(id) {
+      emit('Network.responseReceived', { requestId: id, response: { status: 200, mimeType: 'text/plain', headers: {} } });
+      emit('Network.loadingFinished', { requestId: id, timestamp: 101 });
+    },
+    fail(id) { emit('Network.loadingFailed', { requestId: id, timestamp: 101, errorText: 'net::ERR_ABORTED' }); },
+    log(text) { emit('Runtime.consoleAPICalled', { type: 'log', args: [{ type: 'string', value: text }], timestamp: 1 }); },
+    exception(text) { emit('Runtime.exceptionThrown', { timestamp: 1, exceptionDetails: { text } }); },
+  };
+}
+
+test('late requests, failures and redirects never move from recording A into recording B', async t => {
+  const h = await captureHarness(t);
+  h.start('A');
+  for (const id of ['slow', 'failed', 'redirect']) h.request(id);
+  await h.capture.flush();
+  await h.stop();
+  h.start('B');
+  h.finish('slow');
+  h.fail('failed');
+  h.request('redirect', { redirectResponse: { status: 302, headers: {} } });
+  h.finish('redirect');
+  h.request('fresh');
+  h.finish('fresh');
+  await h.capture.flush();
+  assert.deepEqual(h.events.map(e => [e.recordingId, e.type, e.payload.requestId]), [
+    ['A', 'network.request', 'slow'], ['A', 'network.request', 'failed'], ['A', 'network.request', 'redirect'],
+    ['B', 'network.request', 'fresh'], ['B', 'network.response', 'fresh'],
+  ]);
+});
+
+test('requests started before a pause cannot complete or redirect into the resumed capture interval', async t => {
+  const h = await captureHarness(t);
+  h.start('A');
+  for (const id of ['slow', 'failed', 'redirect']) h.request(id);
+  await h.capture.flush();
+  await h.stop();
+  h.start('A');
+  h.finish('slow');
+  h.fail('failed');
+  h.request('redirect', { redirectResponse: { status: 302, headers: {} } });
+  h.finish('redirect');
+  h.request('fresh');
+  h.finish('fresh');
+  await h.capture.flush();
+  assert.deepEqual(h.events.map(e => [e.type, e.payload.requestId]), [
+    ['network.request', 'slow'], ['network.request', 'failed'], ['network.request', 'redirect'],
+    ['network.request', 'fresh'], ['network.response', 'fresh'],
+  ]);
+});
+
+for (const phase of ['idle', 'paused']) {
+  test(`requests and console events observed while ${phase} are not adopted when capture starts`, async t => {
+    const h = await captureHarness(t);
+    if (phase === 'paused') { h.start('A'); await h.stop(); }
+    for (const id of ['slow', 'failed', 'redirect']) h.request(id);
+    h.log('outside capture');
+    h.exception('outside exception');
+    // Start before queued work can run, and let the old requests finish afterward.
+    h.start('A');
+    h.finish('slow');
+    h.fail('failed');
+    h.request('redirect', { redirectResponse: { status: 302, headers: {} } });
+    h.finish('redirect');
+    h.request('fresh');
+    h.finish('fresh');
+    h.log('inside capture');
+    await h.capture.flush();
+    assert.deepEqual(h.events.map(e => [e.type, e.payload.requestId ?? e.payload.text]), [
+      ['network.request', 'fresh'], ['network.response', 'fresh'], ['console.message', 'inside capture'],
+    ]);
+  });
+}
+
+test('stop waits for persisted events and excludes messages arriving while it drains', async t => {
+  const debug = fakeDebugger(), events = [], writing = deferred(), release = deferred();
+  const capture = await new NetworkCapture({ debugger: debug }, {
+    recordingId: () => 'A',
+    record: async (type, payload) => {
+      writing.resolve();
+      await release.promise;
+      events.push({ type, payload });
+    },
+  }).init();
+  t.after(async () => { release.resolve(); await capture.close(); });
+  capture.start();
+  const log = text => debug.emit('message', {}, 'Runtime.consoleAPICalled', { type: 'log', args: [{ type: 'string', value: text }], timestamp: 1 });
+  log('before stop');
+  let stopped = false;
+  const stopping = capture.stop().then(() => { stopped = true; });
+  await writing.promise;
+  log('during stop');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(stopped, false, 'the boundary must wait for the sink write');
+  release.resolve();
+  await stopping;
+  await capture.flush();
+  assert.deepEqual(events.map(e => e.payload.text), ['before stop']);
+});
+
 test('NetworkCapture records only while recording, correlates by requestId and skips isolated worlds', async t => {
   const debug = fakeDebugger(), events = [];
   let recordingId = null;

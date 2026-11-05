@@ -20,7 +20,7 @@ const runId = new Date().toISOString().replace(/[:.]/g, '-');
 const dataDir = path.join(root, 'output', `codegen-data-${runId}`);
 const screens = path.join(root, 'output', 'screens');
 const artifacts = path.join(root, 'output', 'playwright', `codegen-${runId}`);
-const python = process.env.TRACEDOCK_PYTHON || 'python';
+const python = process.env.TRACEDOCK_PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
 const logs = [];
 const errors = [];
 let desktop;
@@ -265,5 +265,7 @@ run()
   .finally(async () => {
     await browser?.close().catch(() => {});
     await desktop?.close().catch(() => {});
+    await fs.mkdir(artifacts, { recursive: true });
+    await fs.writeFile(path.join(artifacts, 'electron.log'), logs.join(''));
     await fs.rm(dataDir, { recursive: true, force: true }).catch(() => {});
   });
