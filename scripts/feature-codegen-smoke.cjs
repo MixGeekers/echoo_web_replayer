@@ -20,7 +20,7 @@ const runId = new Date().toISOString().replace(/[:.]/g, '-');
 const dataDir = path.join(root, 'output', `codegen-data-${runId}`);
 const screens = path.join(root, 'output', 'screens');
 const artifacts = path.join(root, 'output', 'playwright', `codegen-${runId}`);
-const python = process.env.TRACEDOCK_PYTHON || 'python';
+const python = process.env.TRACEDOCK_PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
 const logs = [];
 const errors = [];
 let desktop;
@@ -169,8 +169,10 @@ async function run() {
   await step('复制 puts the exact script on the clipboard; 保存为文件 writes it through the main-process dialog', async () => {
     await desktop.evaluate(({ clipboard }) => clipboard.writeText(''));
     await ui.locator('#codegen-copy').click();
-    await until(async () => (await desktop.evaluate(({ clipboard }) => clipboard.readText())) === tsCode, 'clipboard has the script');
     await until(async () => (await ui.locator('#toast-title').textContent()) === '脚本已复制', 'copy toast');
+    const copied = await until(() => desktop.evaluate(({ clipboard }) => clipboard.readText()), 'clipboard has the script');
+    // Clipboard API text is converted to native CRLF line endings on Windows.
+    assert.equal(process.platform === 'win32' ? copied.replace(/\r\n/g, '\n') : copied, tsCode);
     const target = path.join(artifacts, 'saved.spec.ts');
     await desktop.evaluate(({ dialog }, filePath) => {
       globalThis.codegenSaveOptions = null;
@@ -265,5 +267,7 @@ run()
   .finally(async () => {
     await browser?.close().catch(() => {});
     await desktop?.close().catch(() => {});
+    await fs.mkdir(artifacts, { recursive: true });
+    await fs.writeFile(path.join(artifacts, 'electron.log'), logs.join(''));
     await fs.rm(dataDir, { recursive: true, force: true }).catch(() => {});
   });

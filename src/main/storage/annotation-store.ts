@@ -1,6 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import type {
   Annotation,
   AnnotationAuthor,
@@ -190,7 +191,19 @@ export class AnnotationStore {
         encoding: "utf8",
         flag: "wx",
       });
-      await fs.rename(temporary, filename);
+      // Windows scanners/readers can briefly lock the destination. Retry only
+      // the atomic replacement; never unlink the last valid annotation file.
+      for (let attempt = 0; ; attempt++) {
+        try {
+          await fs.rename(temporary, filename);
+          break;
+        } catch (caught) {
+          if (process.platform !== "win32" || attempt >= 6 ||
+              !["EPERM", "EACCES", "EBUSY"].includes(errorOf(caught).code ?? ""))
+            throw caught;
+          await delay(25 * 2 ** attempt);
+        }
+      }
     } finally {
       await fs.rm(temporary, { force: true }).catch(() => {});
     }

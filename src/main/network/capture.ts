@@ -27,8 +27,14 @@ export interface NetworkSink {
   ): Promise<unknown> | void;
   error?(message: string): void;
 }
+interface CaptureOwner {
+  recordingId: string;
+  /** Each start/resume opens a distinct interval, even within the same recording. */
+  generation: number;
+}
 interface Tracked {
   request: NetworkRequestPayload;
+  owner: CaptureOwner | null;
   /** CDP monotonic seconds of requestWillBeSent and wall-clock offset. */
   start: number;
   offset: number;
@@ -39,8 +45,8 @@ const MAX_TRACKED = 5000;
 
 /**
  * Records XHR/Fetch/Document requests and page console output / uncaught errors
- * through the shared CDP transport. Events are only stored while a recording is
- * active; the sink decides that at emit time, so pause is respected.
+ * through the shared CDP transport. Request ownership is frozen at its first hop;
+ * delayed work can only be saved into that same recording and capture interval.
  */
 export class NetworkCapture {
   private readonly requests = new Map<string, Tracked>();
@@ -50,6 +56,8 @@ export class NetworkCapture {
   private bodyBudget = new Map<string, number>();
   /** Opened by start() after session.start/resume, closed by stop() before session.pause/stop. */
   private capturing = false;
+  private accepting = false;
+  private generation = 0;
   error: string | null = null;
   constructor(
     private readonly host: NetworkHost,
@@ -75,36 +83,50 @@ export class NetworkCapture {
     this.error = message;
     this.sink.error?.(message);
   }
-  private emit<K extends keyof NetworkPayloadMap>(
+  private async emit<K extends keyof NetworkPayloadMap>(
+    owner: CaptureOwner,
     type: K,
     payload: NetworkPayloadMap[K],
     timeMs: number,
-  ): void {
-    if (!this.recordingId()) return;
+  ): Promise<void> {
+    if (!this.isCurrent(owner)) return;
     const timestamp = new Date(Number.isFinite(timeMs) ? timeMs : Date.now()).toISOString();
-    Promise.resolve(
-      this.sink.record(type, payload, { timestamp, summary: networkSummary(type, payload) }),
-    ).catch((error: unknown) => this.fail(`保存网络事件失败：${errorMessage(error)}`));
+    try {
+      await this.sink.record(type, payload, { timestamp, summary: networkSummary(type, payload) });
+    } catch (error) {
+      this.fail(`保存网络事件失败：${errorMessage(error)}`);
+    }
   }
-  private schedule(task: () => Promise<void> | void): void {
-    this.queue = this.queue.then(task).catch((error: unknown) => {
+  private schedule(owner: CaptureOwner | null, task: (owner: CaptureOwner) => Promise<void>): void {
+    if (!this.accepting || !owner || !this.isCurrent(owner)) return;
+    this.queue = this.queue.then(() => {
+      if (this.isCurrent(owner)) return task(owner);
+    }).catch((error: unknown) => {
       this.fail(`网络事件处理失败：${errorMessage(error)}`);
     });
   }
   flush(): Promise<void> {
     return this.queue;
   }
-  private recordingId(): string | null {
-    return this.capturing ? this.sink.recordingId() : null;
+  private owner(): CaptureOwner | null {
+    const recordingId = this.capturing && this.accepting ? this.sink.recordingId() : null;
+    return recordingId ? { recordingId, generation: this.generation } : null;
+  }
+  private isCurrent(owner: CaptureOwner): boolean {
+    return this.capturing && owner.generation === this.generation && owner.recordingId === this.sink.recordingId();
   }
   /** Begin storing events (call after the session.start / session.resume boundary). */
   start(): void {
+    this.generation++;
     this.capturing = true;
+    this.accepting = true;
   }
-  /** Store in-flight events, then stop (call before the session.pause / session.stop boundary). */
+  /** Drain already received events and their writes; later arrivals belong outside this interval. */
   async stop(): Promise<void> {
+    const generation = this.generation;
+    this.accepting = false;
     await this.flush();
-    this.capturing = false;
+    if (generation === this.generation) this.capturing = false;
   }
   private wall(tracked: Tracked, seconds: unknown): number {
     return typeof seconds === "number" ? (seconds + tracked.offset) * 1000 : Date.now();
@@ -119,20 +141,21 @@ export class NetworkCapture {
     const requestId = params.requestId;
     if (method === "Network.requestWillBeSent") {
       const previous = this.requests.get(requestId);
-      if (previous && params.redirectResponse !== undefined) {
+      const redirect = params.redirectResponse !== undefined;
+      if (previous && redirect) {
         // Redirects reuse requestId: close the previous hop as a 3xx response.
         const hop = shapeResponse(previous.request, { response: params.redirectResponse, type: params.type }, this.duration(previous, params.timestamp));
         hop.redirectTo = String(object(params.request).url ?? "");
         hop.bodyOmitted = "重定向响应没有正文";
         const at = this.wall(previous, params.timestamp);
-        this.schedule(() => this.emit("network.response", hop, at));
+        this.schedule(previous.owner, owner => this.emit(owner, "network.response", hop, at));
       }
       const type = typeof params.type === "string" ? params.type : "";
       if (!TRACKED_RESOURCE_TYPES.has(type)) {
         this.requests.delete(requestId);
         return;
       }
-      const redirects = previous ? previous.redirects + 1 : 0;
+      const redirects = redirect ? (previous?.redirects ?? 0) + 1 : 0;
       const request = shapeRequest(params, redirects);
       if (!request) return;
       const timestamp = typeof params.timestamp === "number" ? params.timestamp : Date.now() / 1000,
@@ -141,11 +164,13 @@ export class NetworkCapture {
         const oldest = this.requests.keys().next().value;
         if (oldest !== undefined) this.requests.delete(oldest);
       }
-      const tracked: Tracked = { request, start: timestamp, offset: wallTime - timestamp, redirects };
+      // An unobserved/idle first hop must never be adopted by a later redirect.
+      const owner = redirect ? previous?.owner ?? null : this.owner();
+      const tracked: Tracked = { request, owner, start: timestamp, offset: wallTime - timestamp, redirects };
       this.requests.set(requestId, tracked);
       const needsPostData = request.postDataOmitted !== undefined;
-      this.schedule(async () => {
-        if (needsPostData && this.recordingId()) {
+      this.schedule(owner, async owner => {
+        if (needsPostData) {
           try {
             const result = object(await this.lease?.sendCommand("Network.getRequestPostData", { requestId }));
             if (typeof result.postData === "string") {
@@ -156,7 +181,7 @@ export class NetworkCapture {
             request.postDataOmitted = `无法读取请求体：${errorMessage(error)}`;
           }
         }
-        this.emit("network.request", request, wallTime * 1000);
+        await this.emit(owner, "network.request", request, wallTime * 1000);
       });
       return;
     }
@@ -173,7 +198,7 @@ export class NetworkCapture {
         : undefined;
       const payload = shapeFailed(tracked.request, params, this.duration(tracked, params.timestamp), status);
       const at = this.wall(tracked, params.timestamp);
-      this.schedule(() => this.emit("network.failed", payload, at));
+      this.schedule(tracked.owner, owner => this.emit(owner, "network.failed", payload, at));
       return;
     }
     if (method !== "Network.loadingFinished") return;
@@ -185,15 +210,13 @@ export class NetworkCapture {
       typeof params.encodedDataLength === "number" ? params.encodedDataLength : undefined,
     );
     const at = this.wall(tracked, params.timestamp);
-    this.schedule(async () => {
-      const id = this.recordingId();
-      if (!id) return;
-      Object.assign(payload, await this.body(id, requestId, payload));
-      this.emit("network.response", payload, at);
+    this.schedule(tracked.owner, async owner => {
+      Object.assign(payload, await this.body(owner, requestId, payload));
+      await this.emit(owner, "network.response", payload, at);
     });
   }
   private async body(
-    recordingId: string,
+    owner: CaptureOwner,
     requestId: string,
     payload: { resourceType: string; mimeType: string; encodedDataLength?: number; status: number },
   ): Promise<object> {
@@ -202,7 +225,7 @@ export class NetworkCapture {
     if ((payload.encodedDataLength ?? 0) > NETWORK_LIMITS.readBodyBytes)
       return { bodyOmitted: `响应超过 ${NETWORK_LIMITS.readBodyBytes / 1024 / 1024} MiB，未读取正文` };
     if (payload.status === 204 || payload.status === 304) return { bodyOmitted: "该状态码没有响应正文" };
-    const used = this.bodyBudget.get(recordingId) ?? 0;
+    const used = this.bodyBudget.get(owner.recordingId) ?? 0;
     if (used >= NETWORK_LIMITS.sessionBodyBytes)
       return { bodyOmitted: `本次采集的响应正文已达 ${NETWORK_LIMITS.sessionBodyBytes / 1024 / 1024} MiB 上限` };
     let response: unknown;
@@ -211,8 +234,9 @@ export class NetworkCapture {
     } catch (error) {
       return { bodyOmitted: `无法读取响应正文：${errorMessage(error)}` };
     }
+    if (!this.isCurrent(owner)) return {};
     const result = captureBody(response, payload.mimeType);
-    if ("body" in result) this.bodyBudget.set(recordingId, used + Math.min(result.body.bytes, NETWORK_LIMITS.bodyBytes));
+    if ("body" in result) this.bodyBudget.set(owner.recordingId, used + Math.min(result.body.bytes, NETWORK_LIMITS.bodyBytes));
     return result;
   }
   private onRuntime(method: string, params: Record<string, unknown>): void {
@@ -237,7 +261,7 @@ export class NetworkCapture {
       if (params.type === "clear" || params.type === "endGroup") return;
       const payload = shapeConsole(params),
         at = typeof params.timestamp === "number" ? params.timestamp : Date.now();
-      this.schedule(() => this.emit("console.message", payload, at));
+      this.schedule(this.owner(), owner => this.emit(owner, "console.message", payload, at));
       return;
     }
     if (method === "Runtime.exceptionThrown") {
@@ -245,7 +269,7 @@ export class NetworkCapture {
       if (typeof context === "number" && this.isolatedContexts.has(context)) return;
       const payload = shapeException(params),
         at = typeof params.timestamp === "number" ? params.timestamp : Date.now();
-      this.schedule(() => this.emit("console.exception", payload, at));
+      this.schedule(this.owner(), owner => this.emit(owner, "console.exception", payload, at));
     }
   }
   async close(): Promise<void> {

@@ -18,6 +18,7 @@ const runId = new Date().toISOString().replace(/[:.]/g, '-');
 const dataDir = path.join(root, 'output', `feature-network-data-${runId}`);
 const zipPath = path.join(root, 'output', 'playwright', `feature-network-${runId}.zip`);
 const logs = [], errors = [], steps = [];
+const pendingResponses = new Map();
 let desktop, server;
 
 const PAGE = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>网络采集验证</title>
@@ -35,6 +36,12 @@ document.getElementById('do-throw').onclick = () => { setTimeout(() => { throw n
 </script></body></html>`;
 
 function handler(request, response) {
+  if (request.url.startsWith('/api/deferred/')) {
+    const key = request.url.slice('/api/deferred/'.length);
+    pendingResponses.set(key, response);
+    response.once('close', () => pendingResponses.delete(key));
+    return;
+  }
   if (request.url === '/') {
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     return response.end(PAGE);
@@ -87,6 +94,27 @@ async function launch() {
 }
 const appPage = (instance, fragment) => until(() => instance.context().pages().find(page => page.url().includes(fragment)), `page ${fragment}`);
 const state = ui => ui.evaluate(() => window.collector.getState());
+async function beginDeferred(guest, key) {
+  await guest.evaluate(key => {
+    window.pendingFetches ??= {};
+    window.pendingFetches[key] = fetch(`/api/deferred/${key}`).then(response => response.text());
+  }, key);
+  await until(() => pendingResponses.has(key), `server receives ${key}`);
+}
+async function releaseDeferred(guest, key, redirect = false) {
+  const response = pendingResponses.get(key);
+  assert.ok(response, `pending response for ${key}`);
+  response.writeHead(redirect ? 302 : 200, redirect
+    ? { location: `/api/data?from=${key}` }
+    : { 'content-type': 'text/plain' });
+  response.end(key);
+  await guest.evaluate(key => window.pendingFetches[key], key);
+}
+async function sentinel(ui, guest, sessionId, key) {
+  await guest.evaluate(key => fetch(`/api/data?sentinel=${key}`).then(response => response.text()), key);
+  await until(async () => (await allEvents(ui, sessionId, ['network.response']))
+    .some(event => event.payload?.url.endsWith(`?sentinel=${key}`)), `capture ${key} sentinel`);
+}
 async function allEvents(ui, sessionId, types) {
   const result = [];
   let offset = 0;
@@ -197,15 +225,25 @@ async function run() {
   });
 
   await step('pause excludes network and console events', async () => {
+    await beginDeferred(guest, 'before-pause');
+    await until(async () => (await allEvents(ui, sessionId, ['network.request']))
+      .some(event => event.payload?.url.endsWith('/before-pause')), 'request stored before pause');
     await ui.locator('#pause-button').click();
     await until(async () => (await state(ui)).session.status === 'paused', 'paused');
     const before = (await allEvents(ui, sessionId, ['network', 'console'])).length;
     await guest.locator('#do-fetch').click();
     await guest.locator('#do-console').click();
+    await beginDeferred(guest, 'during-pause');
     await new Promise(resolve => setTimeout(resolve, 800));
     assert.equal((await allEvents(ui, sessionId, ['network', 'console'])).length, before);
     await ui.locator('#pause-button').click();
     await until(async () => (await state(ui)).session.status === 'recording', 'resumed');
+    await releaseDeferred(guest, 'before-pause', true);
+    await releaseDeferred(guest, 'during-pause');
+    await sentinel(ui, guest, sessionId, 'after-resume');
+    const after = await allEvents(ui, sessionId, ['network', 'console']);
+    assert.equal(after.filter(event => event.payload?.url?.includes('before-pause')).length, 1, 'only the original pre-pause request remains');
+    assert.ok(!after.some(event => event.payload?.url?.includes('during-pause')), 'paused requests cannot finish into the resumed interval');
   });
 
   await step('「网络」filter, highlighted failure and detail panel', async () => {
@@ -246,6 +284,9 @@ async function run() {
   });
 
   await step('stop, full export lists failures in timeline.md and README mentions new types', async () => {
+    await beginDeferred(guest, 'previous-recording');
+    await until(async () => (await allEvents(ui, sessionId, ['network.request']))
+      .some(event => event.payload?.url.endsWith('/previous-recording')), 'slow request stored before stop');
     await ui.locator('#stop-button').click();
     await until(async () => (await state(ui)).session.status === 'stopped', 'stopped');
     const all = await allEvents(ui, sessionId);
@@ -264,6 +305,21 @@ async function run() {
     assert.match(section, /console\.exception \| Uncaught Error: feature smoke thrown error/);
     assert.ok(!section.includes('GET 200'));
     assert.match(archive.readAsText('AGENT_README.md'), /network\.request \/ network\.response \/ network\.failed/);
+  });
+
+  await step('late responses and redirects cannot move into the next recording', async () => {
+    const original = await allEvents(ui, sessionId, ['network', 'console']);
+    const sessionGroupId = (await state(ui)).session.sessionGroupId;
+    await beginDeferred(guest, 'between-recordings');
+    const next = await ui.evaluate(sessionGroupId => window.collector.startSession({ sessionGroupId, name: '网络归属 · 第二条记录' }), sessionGroupId);
+    assert.notEqual(next.id, sessionId);
+    await releaseDeferred(guest, 'previous-recording', true);
+    await releaseDeferred(guest, 'between-recordings');
+    await sentinel(ui, guest, next.id, 'next-recording');
+    const events = await allEvents(ui, next.id, ['network', 'console']);
+    assert.ok(!events.some(event => /previous-recording|between-recordings/.test(event.payload?.url ?? '')), 'new recording must not adopt old requests or redirect hops');
+    assert.deepEqual(await allEvents(ui, sessionId, ['network', 'console']), original, 'stopped recording stays unchanged');
+    await ui.evaluate(() => window.collector.stopSession());
   });
 
   assert.deepEqual(errors, [], 'renderer must have no uncaught JavaScript errors');

@@ -31,9 +31,12 @@ npm run build            # 生成 Windows x64 便携版 EXE
 node scripts/portable-smoke.cjs # 构建后验证单文件启动、录制与重复启动
 node scripts/export-desktop-smoke.cjs # 验证大导出期间暂停、取消和继续录制
 node scripts/large-recording.cjs # 大记录流式导出、恢复及内存验收
-node scripts/feature-network-smoke.cjs # 网络请求、控制台与异常采集、筛选、详情及导出汇总（先 npm run compile）
-node scripts/feature-annotations-smoke.cjs # 书签、标注、书签列表、回放跳转与片段导出验收（截图在 output/screens/）
+npm run test:network      # 网络/控制台采集、筛选、详情、导出及跨录制/暂停边界
+npm run test:annotations  # 书签、标注、回放跳转与片段导出验收
+npm run test:codegen      # 脚本生成、复制/保存/导出，并在 Chromium 实际执行
 ```
+
+首次运行 `test:codegen` 前需执行 `npx --no-install playwright-core install chromium --only-shell` 安装测试浏览器。Linux 的桌面验收需在图形会话中运行，或使用 `xvfb-run -a npm run test:codegen`。三个新增功能的桌面验收均纳入 `npm run verify` 和 Windows CI，截图及 Electron 日志随 CI 产物保存。
 
 便携版输出为 `dist/TraceDock-0.2.0-Windows-x64.exe`；目录版位于 `dist/win-unpacked/`。便携版无需安装，本项目未配置 Windows 代码签名。首次安装依赖和构建可能需要联网下载 Electron 与构建工具。
 
@@ -57,7 +60,7 @@ node scripts/feature-annotations-smoke.cjs # 书签、标注、书签列表、�
 
 选中采集记录后点击右侧「生成脚本」，查看由时间线操作事件推断的 Playwright Test（TypeScript）脚本，可切换为 pytest-playwright（Python），支持「复制」和「保存为文件」。首步打开起始地址；定位器按 `getByTestId` > `getByRole`（名称）> `getByLabel` > `getByPlaceholder` > `#id` > 文本 > CSS 选择；连续输入合并为最终值的 `fill`，下拉框、复选框和单选框分别生成 `selectOption`、`check/uncheck`；与已输入内容重复的字符按键、由点击或回车触发的提交不重复生成；操作引起的导航生成 `toHaveURL` 断言，地址栏跳转生成 `goto`。同源 iframe 使用 `frameLocator`，开放 Shadow DOM 以宿主元素限定范围。滚动与焦点默认省略，可勾选「包含滚动」。每步带 `// seq N` 注释对应时间线，暂停、采集错误、无法定位的目标和文件上传以 TODO 注释标出。生成流式读取时间线，跳过 DOM 快照与变化行，不整体载入大记录。
 
-脚本是推断出的草稿，没有自动执行；定位器取自录制时的候选项，可能不唯一或随页面版本失效，并保留录制时的原始输入值（包括密码）。导出时可勾选「附带 Playwright 脚本」把 `script.spec.ts` 放进 ZIP；MCP 客户端可调用只读工具 `tracedock_codegen` 获取同样的脚本。验收：`xvfb-run -a node scripts/feature-codegen-smoke.cjs`（录制演示页、生成/复制/保存/导出，并用 Chromium 实际运行生成的脚本）。
+脚本是推断出的草稿，没有自动执行；定位器取自录制时的候选项，可能不唯一或随页面版本失效，并保留录制时的原始输入值（包括密码）。导出时可勾选「附带 Playwright 脚本」把 `script.spec.ts` 放进 ZIP；MCP 客户端可调用只读工具 `tracedock_codegen` 获取同样的脚本。验收：`npm run test:codegen`（录制演示页、生成/复制/保存/导出，并用 Chromium 实际运行生成的脚本）。
 
 ## Profile、Session 与采集记录生命周期（新基线）
 
@@ -112,6 +115,8 @@ Profile（独立登录环境）
 DOM 变化约每 150 ms 批量发送，连续滚动按约 150 ms 合并。事件以主进程分配的递增 `seq` 排序；`timestamp` 是来源时间，`elapsedMs` 是接收时相对会话开始的时间，包含暂停时长。`mutationCount` 统计变化批次数，不等于 MutationRecord 条数。
 
 网络与控制台事件通过浏览器调试协议在主进程采集，同样只在录制中记录、按 `requestId` 关联请求与响应。时间线可用「网络」「控制台」筛选，失败请求（HTTP ≥ 400 或网络失败）、控制台错误和页面异常以错误色标出，详情面板展示请求头、响应头与正文。导出的 `timeline.md` 末尾汇总失败请求和页面异常。跨域 iframe 的请求与日志不在范围内。
+
+请求归属固定在发起时的采集记录与采集区间，重定向沿用首跳归属。结束后开启新录制、或暂停后恢复，均不会接收旧区间请求的迟到响应、失败或重定向；空闲和暂停期间发起的请求也不会被后续区间接收。停止采集前已收到的事件会先完成保存，再写入暂停或结束边界。
 
 快照在开始或恢复录制、页面加载、手动抓取和录制结束等节点生成。节点 ID 仅用于对应文档内的关联；不能将它当作跨导航稳定的自动化定位器。
 
