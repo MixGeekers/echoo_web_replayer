@@ -452,3 +452,95 @@ test('stop() stores in-flight responses, then closes the capture window', async 
   await capture.flush();
   assert.equal(events.length, 2);
 });
+
+test('iframe sessions isolate duplicate request and execution context IDs', async t => {
+  const debug = fakeDebugger(), events = [];
+  const send = debug.sendCommand;
+  const reads = [];
+  debug.sendCommand = async (method, params, session) => {
+    if (method === 'Network.getResponseBody' || method === 'Network.getRequestPostData') {
+      reads.push([method, params.requestId, session]);
+      return {body: session || 'top', postData: session || 'top'};
+    }
+    return send(method, params, session);
+  };
+  const capture = await new NetworkCapture({ debugger: debug }, {
+    recordingId: () => 'A',
+    record: (type, payload) => events.push({ type, payload }),
+  }).init();
+  t.after(() => capture.close());
+  await capture.start();
+  const emit = (method, params, session) => debug.emit('message', {}, method, params, session);
+  emit('Target.attachedToTarget', { sessionId: 'child', targetInfo: { type: 'iframe' } });
+  for (const session of [undefined, 'child']) {
+    const isDefault = session === 'child';
+    emit('Runtime.executionContextCreated', { context: { id: 1, auxData: { frameId: session || 'top', isDefault } } }, session);
+    emit('Runtime.consoleAPICalled', { executionContextId: 1, type: 'warn', args: [{ type: 'string', value: 'message' }] }, session);
+    emit('Network.requestWillBeSent', requestParams({ frameId: session || 'top',
+      request: {url: 'http://h/upload', method: 'POST', hasPostData: true, headers: {'x-source': session || 'top'}} }), session);
+    emit('Network.responseReceived', { requestId: 'r1', response: { status: 200, mimeType: 'text/plain', headers: {'x-reply': session || 'top'} } }, session);
+  }
+  emit('Network.loadingFinished', { requestId: 'r1', timestamp: 101 }, 'child');
+  emit('Network.loadingFinished', { requestId: 'r1', timestamp: 102 });
+  await capture.flush();
+  const logs = events.filter(e => e.type === 'console.message');
+  assert.deepEqual(logs.map(e => e.payload.frameId), ['child']);
+  const responses = events.filter(e => e.type === 'network.response').map(e => e.payload);
+  assert.deepEqual(responses.map(p => [p.requestId, p.frameId, p.durationMs]), [
+    ['child:r1', 'child', 1000], ['r1', 'top', 2000],
+  ]);
+  const child = events.find(e => e.type === 'network.request' && e.payload.frameId === 'child').payload;
+  assert.equal(child.postData.text, 'child');
+  assert.deepEqual(child.requestHeaders, {'x-source':'child'});
+  assert.deepEqual(responses.map(p => [p.responseHeaders['x-reply'], p.body.text]), [['child','child'], ['top','top']]);
+  assert.deepEqual(reads, [
+    ['Network.getRequestPostData', 'r1', undefined], ['Network.getRequestPostData', 'r1', 'child'],
+    ['Network.getResponseBody', 'r1', 'child'], ['Network.getResponseBody', 'r1', undefined],
+  ]);
+  await capture.stop();
+  emit('Network.requestWillBeSent', requestParams({request: {url:'http://h/idle', hasPostData:true}}), 'child');
+  emit('Network.loadingFinished', {requestId:'r1'}, 'child');
+  await capture.start();
+  emit('Network.requestWillBeSent', requestParams({redirectResponse:{status:302}}), 'child');
+  emit('Network.loadingFinished', {requestId:'r1'}, 'child');
+  await capture.flush();
+  assert.equal(reads.length, 4, 'idle requests and their later redirects never trigger body reads');
+});
+
+test('iframe redirect preserves hop headers and reports a body missing from the completion target', async t => {
+  const debug = fakeDebugger(), events = [], reads = [];
+  const send = debug.sendCommand;
+  debug.sendCommand = async (method, params, sessionId) => {
+    if (method === 'Network.getResponseBody') {
+      reads.push([sessionId, params.requestId]);
+      throw new Error('No resource with given identifier');
+    }
+    return send(method, params, sessionId);
+  };
+  const capture = await new NetworkCapture({debugger:debug}, {
+    recordingId: () => 'rec', record: (type,payload) => events.push({type,payload}),
+  }).init();
+  t.after(() => capture.close());
+  await capture.start();
+  const emit = (method, params, session) => debug.emit('message', {}, method, params, session);
+  emit('Target.attachedToTarget', {sessionId:'outer', targetInfo:{type:'iframe',targetId:'frameA'}});
+  emit('Target.attachedToTarget', {sessionId:'inner', targetInfo:{type:'iframe',targetId:'frameB'}}, 'outer');
+  const nav = {type:'Document', requestId:'loader', loaderId:'loader', frameId:'frameB'};
+  emit('Network.requestWillBeSent', requestParams({...nav}), 'outer');
+  emit('Network.requestWillBeSent', requestParams({...nav,
+    request: {url:'http://h/landed', method:'GET', headers:{'x-hop':'two'}},
+    redirectResponse: {status:303, headers:{location:'http://h/landed'}},
+  }), 'outer');
+  emit('Network.responseReceived', {...nav, response:{status:200, mimeType:'text/html', headers:{'x-final':'yes'}}}, 'inner');
+  emit('Network.loadingFinished', {requestId:'loader', timestamp:101}, 'inner');
+  await capture.flush();
+  const [first, redirected, next, completed] = events.map(e => e.payload);
+  assert.equal(first.postData.text, '{"name":"a"}');
+  assert.equal(redirected.responseHeaders.location, next.url);
+  assert.equal(next.postData, undefined);
+  assert.equal(next.requestId, completed.requestId);
+  assert.deepEqual(completed.requestHeaders, {'x-hop':'two'});
+  assert.deepEqual(completed.responseHeaders, {'x-final':'yes'});
+  assert.match(completed.bodyOmitted, /No resource/);
+  assert.deepEqual(reads, [['inner','loader']]);
+});

@@ -7,6 +7,7 @@ const recorder = new RecorderController({
   acknowledge: (requestId, result) =>
     ipcRenderer.send("recorder:ack", { requestId, ...result }),
 });
+Object.defineProperty(globalThis, "__traceDockOwner", { value: (host: Element) => recorder.frameOwner(host) });
 ipcRenderer.on("recorder:state", (_event, state: unknown) =>
   recorder.state(state),
 );

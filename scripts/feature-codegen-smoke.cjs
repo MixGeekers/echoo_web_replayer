@@ -5,6 +5,7 @@
 // TypeScript against the same local demo page with playwright-core's Chromium.
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
+const http = require('node:http');
 const fss = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
@@ -248,6 +249,85 @@ async function run() {
     assert.equal(await page.frameLocator('#demo-frame').locator('#frame-input').inputValue(), 'iframe 里的输入');
     assert.match(page.url(), /#notes$/);
     await page.screenshot({ path: path.join(screens, 'feature-codegen-replayed-in-chromium.png'), fullPage: false });
+  });
+
+  await step('generated script targets the recorded nested cross-site frame and leaves its identical-URL sibling alone', async () => {
+    const server = http.createServer((req, res) => {
+      const port = server.address().port;
+      res.setHeader('content-type', 'text/html;charset=utf-8');
+      if (req.url === '/') return res.end(`<iframe style="width:400px;height:400px" id="outer" src="http://localhost:${port}/outer"></iframe>`);
+      if (req.url === '/outer') return res.end('<style>iframe{position:absolute;left:0;width:370px;height:185px}#recorded{top:0}#sibling{top:195px}</style>' +
+        ['sibling', 'recorded'].map(name => `<iframe id="${name}" src="http://127.0.0.1:${port}/form"></iframe>`).join(''));
+      if (req.url === '/after') return res.end(`<button id="finish">Confirm</button><output></output>
+        <script>document.querySelector('button').onclick=()=>document.querySelector('output').textContent=sessionStorage.result</script>`);
+      res.end(`<style>#agree{width:28px;height:28px}button{min-height:28px}</style>
+        <form><input data-testid="entry" required><input id="agree" type="checkbox">
+        <select id="category" size="2"><option selected>First</option><option>Second</option></select>
+        <button type="button" id="repeat">Cancel</button><button id="repeat">Submit</button></form>
+        <output></output><button id="next" onclick="location.href='/after'">Continue</button>
+        <script>document.querySelector('form').onsubmit=e=>{e.preventDefault();
+        sessionStorage.result=document.querySelector('output').textContent=[document.querySelector('input').value,
+        document.querySelector('#agree').checked,document.querySelector('select').selectedIndex].join('|')};</script>`);
+    });
+    await new Promise((resolve, reject) => { server.on('error', reject); server.listen(0, '127.0.0.1', resolve); });
+    try {
+      const url = `http://127.0.0.1:${server.address().port}/`;
+      await ui.evaluate(url => window.collector.navigate(url), url);
+      const frame = guest.frameLocator('#outer').frameLocator('#recorded');
+      await frame.getByTestId('entry').waitFor();
+      const id = await ui.evaluate(async () => {
+        const { sessionGroupId } = (await window.collector.getState()).session;
+        return (await window.collector.startSession({sessionGroupId, name:'嵌套跨域表单'})).id;
+      });
+      await until(async () => (await state(ui)).session.snapshotCount > 0, 'nested recording baseline');
+      await frame.getByTestId('entry').fill('recorded-only-text');
+      await frame.locator('#agree').check();
+      await frame.locator('#category option').nth(1).click();
+      await frame.getByText('Submit', {exact:true}).click();
+      assert.equal(await frame.locator('output').textContent(), 'recorded-only-text|true|1',
+        JSON.stringify(await frame.locator('form').evaluate(f => Array.from(f.elements, e => [e.tagName, e.value, e.checked, e.selectedIndex]))));
+      await frame.locator('#next').click();
+      await frame.locator('#finish').click();
+      assert.equal(await frame.locator('output').textContent(), 'recorded-only-text|true|1');
+      await ui.evaluate(() => window.collector.stopSession());
+      const generate = language => ui.evaluate(input => window.collector.generateScript(input), {sessionId:id, language});
+      const ts = await generate('typescript'), py = await generate('python');
+      await fs.writeFile(path.join(artifacts, 'nested.spec.ts'), ts.code);
+      const pyFile = path.join(artifacts, 'test_nested.py');
+      await fs.writeFile(pyFile, py.code);
+      await promisify(execFile)(python, ['-m', 'py_compile', pyFile]);
+      assert.equal(ts.stats.todos, 0, ts.code);
+      assert.equal(py.stats.todos, 0, py.code);
+      assert.match(ts.code, /frameLocator\('#outer'\)\.frameLocator\('#recorded'\)/);
+      assert.ok(ts.code.includes("locator('#finish').click()"), ts.code);
+      assert.match(py.code, /frame_locator\("#outer"\)\.frame_locator\("#recorded"\)/);
+      assert.ok(!ts.code.includes('recorded-only-text') && !py.code.includes('recorded-only-text'));
+      const param = ts.code.match(/frameInput\('(TRACEDOCK_INPUT_\d+)'\)/)[1];
+      process.env[param] = 'replay-test-data';
+      const page = await browser.newPage();
+      page.setDefaultTimeout(5000);
+      try {
+        await shimmedRunner(ts.code)[0].body({page});
+        const outer = page.frameLocator('#outer');
+        assert.equal(await outer.frameLocator('#recorded').locator('output').textContent(), 'replay-test-data|true|1');
+        assert.equal(await outer.frameLocator('#sibling').locator('output').textContent(), '');
+        if (process.env.TRACEDOCK_CODEGEN_PYTHON) {
+          // Optional real Python runtime; the normal CI only requires Python syntax checks.
+          await promisify(execFile)(process.env.TRACEDOCK_CODEGEN_PYTHON, ['-c', [
+            'import runpy, sys',
+            'from playwright.sync_api import sync_playwright',
+            'with sync_playwright() as pw:',
+            '    browser = pw.chromium.launch(executable_path=sys.argv[2])',
+            '    page = browser.new_page()',
+            '    runpy.run_path(sys.argv[1])["test_tracedock_recording"](page)',
+            '    outer = page.frame_locator("#outer")',
+            '    assert outer.frame_locator("#recorded").locator("output").inner_text() == "replay-test-data|true|1"',
+            '    assert outer.frame_locator("#sibling").locator("output").inner_text() == ""',
+            '    browser.close()',
+          ].join('\n'), pyFile, process.env.TRACEDOCK_CODEGEN_CHROMIUM || chromium.executablePath()]);
+        }
+      } finally { delete process.env[param]; await page.close(); }
+    } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
   });
 
   assert.deepEqual(errors, [], `page errors: ${errors.join('\n')}`);

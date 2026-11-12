@@ -19,7 +19,7 @@ const dataDir = path.join(root, 'output', `feature-network-data-${runId}`);
 const zipPath = path.join(root, 'output', 'playwright', `feature-network-${runId}.zip`);
 const logs = [], errors = [], steps = [];
 const pendingResponses = new Map();
-let desktop, server;
+let desktop, server, sameSiteServer;
 
 const PAGE = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>网络采集验证</title>
 <style>body{font:14px system-ui,sans-serif;margin:24px;color:#1e293b}button{margin:4px 6px 4px 0;padding:6px 12px}pre{background:#f1f5f9;padding:8px;min-height:40px}</style></head>
@@ -40,6 +40,25 @@ function handler(request, response) {
     const key = request.url.slice('/api/deferred/'.length);
     pendingResponses.set(key, response);
     response.once('close', () => pendingResponses.delete(key));
+    return;
+  }
+  if (request.url.startsWith('/frame-fixture')) {
+    response.writeHead(200, { 'content-type': 'text/html' });
+    return response.end(`<input><button>Run</button>
+      <script>console.info('frame-loaded');document.querySelector('button').onclick=()=>{
+        console.warn('frame-click');
+        const source = location.search || 'outer';
+        fetch('/api/frame?frame=1',{method:'POST',headers:{'content-type':'application/json','x-frame-source':source},
+          body:JSON.stringify({source})});
+      }</script>`);
+  }
+  if (request.url === '/api/frame?frame=1') {
+    let body = '';
+    request.on('data', chunk => { body += chunk; });
+    request.on('end', () => {
+      response.writeHead(201, { 'content-type': 'application/json', 'x-frame-reply': request.headers['x-frame-source'] });
+      response.end(JSON.stringify({ received: JSON.parse(body).source }));
+    });
     return;
   }
   if (request.url === '/') {
@@ -151,6 +170,8 @@ async function run() {
   await fs.mkdir(dataDir, { recursive: true });
   server = http.createServer(handler);
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
+  sameSiteServer = http.createServer(handler);
+  await new Promise((resolve, reject) => { sameSiteServer.once('error', reject); sameSiteServer.listen(0, '127.0.0.1', resolve); });
   const url = `http://127.0.0.1:${server.address().port}/`;
   desktop = await launch();
   const ui = await appPage(desktop, '/renderer/index.html');
@@ -159,6 +180,7 @@ async function run() {
   await guest.waitForLoadState('load');
   await ui.waitForFunction(async () => !(await window.collector.getState()).browser.loading);
   let sessionId;
+  let nestedRequestId, nestedResponseId;
 
   await step('start recording and open the local fixture page', async () => {
     await ui.locator('#new-session-button').click();
@@ -206,6 +228,7 @@ async function run() {
     assert.equal(ok.payload.resourceType, 'Fetch');
     assert.match(ok.summary, /^GET 200 \/api\/data\?page=1 \d+ms$/);
     const full = await ui.evaluate(input => window.collector.getEvent(input), { sessionId, eventId: ok.id });
+    assert.ok(full.payload.body, full.payload.bodyOmitted);
     assert.equal(JSON.parse(full.payload.body.text).items[0].name, '苹果');
     assert.equal(full.payload.responseHeaders['x-server'], 'feature-smoke');
     const post = await ui.evaluate(input => window.collector.getEvent(input), { sessionId, eventId: byType('network.request').find(e => e.payload.url.endsWith('/api/orders')).id });
@@ -222,6 +245,105 @@ async function run() {
     assert.match(exception.payload.text, /Error: feature smoke thrown error/);
     assert.ok(exception.payload.line > 0);
     assert.ok(!events.some(e => /tracedock|__tracedock/i.test(String(e.payload?.text ?? ''))), 'no TraceDock internal logs');
+  });
+
+  await step('cross-site iframe actions, network and console survive navigation and pause', async () => {
+    const frameUrl = url.replace('127.0.0.1', 'localhost') + 'frame-fixture';
+    await guest.evaluate(src => {
+      const frame = document.createElement('iframe');
+      frame.id = 'cross-site';
+      frame.src = src;
+      document.body.append(frame);
+    }, frameUrl);
+    const frame = guest.frameLocator('#cross-site');
+    async function interact() {
+      await frame.locator('input').fill('fixture');
+      await frame.locator('button').click();
+    }
+    const frameEvents = async () => (await allEvents(ui, sessionId)).sort((a, b) => a.seq - b.seq).filter(event =>
+      event.type === 'action.frame' || event.payload?.text === 'frame-click' ||
+      event.payload?.text === 'frame-loaded' || event.payload?.url?.endsWith('?frame=1'));
+    async function checkClicks(expected, source) {
+      return until(async () => {
+        const events = await frameEvents();
+        const actions = events.filter(e => e.type === 'action.frame' && e.payload.action === 'click');
+        const responses = events.filter(e => e.type === 'network.response');
+        const logs = events.filter(e => e.payload.text === 'frame-click');
+        if ([actions, responses, logs].some(list => list.length < expected)) return false;
+        for (const list of [actions, responses, logs]) assert.equal(list.length, expected);
+        const id = actions.at(-1).payload.frameId;
+        assert.ok(id);
+        assert.equal(responses.at(-1).payload.frameId, id);
+        assert.equal(logs.at(-1).payload.frameId, id);
+        const response = responses.at(-1);
+        const request = events.find(e => e.type === 'network.request' && e.payload.requestId === response.payload.requestId);
+        assert.equal(request.payload.frameId, id);
+        const get = e => ui.evaluate(input => window.collector.getEvent(input), { sessionId, eventId: e.id });
+        const sent = (await get(request)).payload, received = (await get(response)).payload;
+        assert.equal(sent.requestHeaders['x-frame-source'], source);
+        assert.deepEqual(JSON.parse(sent.postData.text), {source});
+        assert.equal(received.responseHeaders['x-frame-reply'], source);
+        assert.deepEqual(JSON.parse(received.body.text), {received: source});
+        if (source === '?nested') {
+          nestedRequestId = request.id;
+          nestedResponseId = response.id;
+        }
+        assert.ok(events.some(e => e.type === 'action.frame' && e.payload.action === 'input'));
+        assert.ok(events.some(e => e.payload.text === 'frame-loaded'));
+        return true;
+      }, `cross-site click, response and console x${expected}`);
+    }
+    await interact();
+    await checkClicks(1, 'outer');
+    const documentEvents = (await allEvents(ui, sessionId)).filter(e => e.payload?.url === frameUrl);
+    const initialRequest = documentEvents.find(e => e.type === 'network.request');
+    const initialResponse = documentEvents.find(e => e.type === 'network.response');
+    assert.ok(initialRequest && initialResponse, 'initial document navigation completed across process swap');
+    assert.equal(initialResponse.payload.requestId, initialRequest.payload.requestId);
+    const doc = await ui.evaluate(input => window.collector.getEvent(input), { sessionId, eventId: initialResponse.id });
+    assert.match(doc.payload.body?.text ?? doc.payload.bodyOmitted, /<button>Run<\/button>/);
+    await ui.evaluate(() => window.collector.pauseSession());
+    await interact();
+    await ui.evaluate(() => window.collector.resumeSession());
+    await guest.locator('#cross-site').evaluate((el, src) => { el.src = src; }, frameUrl + '?navigation');
+    await until(() => guest.frames().some(f => f.url().endsWith('?navigation')), 'iframe navigates');
+    await interact();
+    await checkClicks(2, '?navigation');
+    // A -> B -> A requires recursively attaching a new nested target.
+    await frame.locator('body').evaluate((el, src) => {
+      const nested = document.createElement('iframe');
+      nested.id = 'nested';
+      nested.src = src;
+      el.append(nested);
+    }, url + 'frame-fixture?nested');
+    const nested = frame.frameLocator('#nested');
+    await nested.locator('input').fill('nested fixture');
+    await nested.locator('button').click();
+    await checkClicks(3, '?nested');
+    const clicks = (await frameEvents()).filter(e => e.type === 'action.frame' && e.payload.action === 'click');
+    assert.notEqual(clicks[0].payload.frameId, clicks[2].payload.frameId);
+    await guest.locator('#cross-site').evaluate(el => el.remove());
+  });
+
+  await step('same-site cross-origin iframe is captured and same-origin clicks stay single', async () => {
+    for (const [port, crossOrigin] of [[sameSiteServer.address().port, true], [server.address().port, false]]) {
+      const before = Math.max(...(await allEvents(ui, sessionId)).map(e => e.seq));
+      await guest.evaluate(port => {
+        const frame = document.createElement('iframe');
+        frame.id = 'port-frame';
+        frame.src = `http://127.0.0.1:${port}/frame-fixture`;
+        document.body.append(frame);
+      }, port);
+      await guest.frameLocator('#port-frame').locator('button').click();
+      await until(async () => {
+        const added = (await allEvents(ui, sessionId)).filter(e => e.seq > before);
+        const actions = added.filter(e => e.type === 'action.click' || (e.type === 'action.frame' && e.payload.action === 'click'));
+        if (!added.some(e => e.payload?.text === 'frame-click') || !actions.length) return false;
+        assert.deepEqual(actions.map(e => e.type), [crossOrigin ? 'action.frame' : 'action.click']);
+        return true;
+      }, `one click per frame, crossOrigin=${crossOrigin}`);
+      await guest.locator('#port-frame').evaluate(el => el.remove());
+    }
   });
 
   await step('pause excludes network and console events', async () => {
@@ -256,6 +378,16 @@ async function run() {
     await failedRow.waitFor();
     assert.match(await failedRow.locator('.event-name').innerText(), /网络响应/);
     await screenshot(desktop, 'feature-network-timeline.png');
+    await ui.locator(`#timeline-list [data-event-id="${nestedRequestId}"]`).click();
+    await until(async () => {
+      const text = await ui.locator('#detail-json').innerText();
+      return text.includes('x-frame-source: ?nested') && text.includes('── 请求体') && text.includes('"source"');
+    }, 'iframe request headers and upload in detail panel');
+    await ui.locator(`#timeline-list [data-event-id="${nestedResponseId}"]`).click();
+    await until(async () => {
+      const text = await ui.locator('#detail-json').innerText();
+      return text.includes('x-frame-reply: ?nested') && text.includes('── 响应体') && text.includes('"received"');
+    }, 'iframe response headers and body in detail panel');
     await ui.locator('#timeline-list .timeline-event', { hasText: 'GET 200 /api/data' }).first().click();
     await until(async () => /── 响应体/.test(await ui.locator('#detail-json').innerText()), 'response detail');
     const detail = await ui.locator('#detail-json').innerText();
@@ -304,6 +436,18 @@ async function run() {
     assert.match(section, /network\.response \| GET 500 \/api\/fail/);
     assert.match(section, /console\.exception \| Uncaught Error: feature smoke thrown error/);
     assert.ok(!section.includes('GET 200'));
+    const facts = archive.readAsText('timeline.jsonl').trim().split('\n').map(line => JSON.parse(line));
+    const nestedRequest = facts.find(e => e.id === nestedRequestId).payload;
+    const nestedResponse = facts.find(e => e.id === nestedResponseId).payload;
+    assert.equal(nestedRequest.requestId, nestedResponse.requestId);
+    assert.equal(nestedRequest.requestHeaders['x-frame-source'], '?nested');
+    assert.equal(nestedResponse.responseHeaders['x-frame-reply'], '?nested');
+    assert.deepEqual(JSON.parse(nestedRequest.postData.text), {source:'?nested'});
+    assert.deepEqual(JSON.parse(nestedResponse.body.text), {received:'?nested'});
+    const frameClick = facts.find(e => e.type === 'action.frame' && e.payload.action === 'click');
+    assert.ok(frameClick?.payload.documentId);
+    assert.ok(facts.some(e => e.type === 'network.response' && e.payload.frameId === frameClick.payload.frameId));
+    assert.ok(facts.some(e => e.type === 'console.message' && e.payload.frameId === frameClick.payload.frameId));
     assert.match(archive.readAsText('AGENT_README.md'), /network\.request \/ network\.response \/ network\.failed/);
   });
 
@@ -332,7 +476,11 @@ run().catch(async error => {
   process.exitCode = 1;
 }).finally(async () => {
   if (desktop) await desktop.close().catch(() => {});
-  if (server) { server.closeAllConnections?.(); await new Promise(resolve => server.close(resolve)); }
+  for (const fixture of [server, sameSiteServer]) {
+    if (!fixture) continue;
+    fixture.closeAllConnections?.();
+    await new Promise(resolve => fixture.close(resolve));
+  }
   await fs.mkdir(path.join(root, 'output'), { recursive: true });
   await fs.writeFile(path.join(root, 'output', 'feature-network-electron.log'), logs.join(''));
   await fs.rm(dataDir, { recursive: true, force: true }).catch(() => {});

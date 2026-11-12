@@ -1,7 +1,7 @@
 /**
- * Pure Playwright script generator. Events are pushed one at a time so that
- * callers can stream huge timelines; only the (small) step list is retained.
+ * Pure Playwright script generator. Callers can stream events in timeline order.
  */
+import { FrameHistory } from "./frame-history";
 import type {
   CodegenLanguage,
   CodegenOptions,
@@ -149,11 +149,12 @@ interface FrameHop {
   shadowHosts: string[];
 }
 export interface CodegenTarget {
+  documentId: string;
   key: string;
   tag: string;
   type: string;
   editable: boolean;
-  /** null when a same-origin frame on the path has no usable selector. */
+  /** null when a frame on the path has no usable selector. */
   frames: FrameHop[] | null;
   shadowHosts: string[];
   locator: LocatorChoice | null;
@@ -252,6 +253,7 @@ export function describeTarget(rawTarget: unknown, documentId: string): CodegenT
     : [];
   const nodeType = num(target.nodeType);
   return {
+    documentId,
     key: `${documentId}|${str(scope.rootId)}|${nodeId}`,
     tag,
     type,
@@ -270,9 +272,9 @@ export type Step = StepBase &
     | { op: "reload" }
     | { op: "click"; target: CodegenTarget; button: string | null; modifiers: string[]; detail: number; x: number | null; y: number | null }
     | { op: "dblclick"; target: CodegenTarget; modifiers: string[] }
-    | { op: "fill"; target: CodegenTarget; value: string }
+    | { op: "fill"; target: CodegenTarget; value: string; parameter?: string }
     | { op: "check" | "uncheck"; target: CodegenTarget }
-    | { op: "select"; target: CodegenTarget; values: string[] }
+    | { op: "select"; target: CodegenTarget; values: string[]; indices?: number[] }
     | { op: "press"; target: CodegenTarget | null; key: string }
     | { op: "submit"; target: CodegenTarget }
     | { op: "files"; target: CodegenTarget; names: string[] }
@@ -298,6 +300,8 @@ function sameTarget(step: Step | undefined, target: CodegenTarget): step is Targ
 const hasTarget = (step: Step): step is TargetStep => "target" in step && !!step.target;
 
 export class ScriptBuilder {
+  private history = new FrameHistory();
+  needsFrameHistory = false;
   private readonly steps: Step[] = [];
   private readonly fills = new Map<string, Extract<Step, { op: "fill" }>>();
   private readonly omitted: Record<string, number> = {};
@@ -346,6 +350,7 @@ export class ScriptBuilder {
   /** Feed one timeline event in seq order. */
   add(event: CodegenEvent): void {
     this.events++;
+    this.history.update(event);
     const type = str(event.type);
     const seq = num(event.seq) ?? 0;
     if (seq) {
@@ -399,6 +404,12 @@ export class ScriptBuilder {
       case "page.navigation":
         this.navigation(payload, seq, at);
         return;
+      case "action.frame":
+        if ((!payload.framePath || !payload.target) && payload.visualNodeId) {
+          this.needsFrameHistory = true;
+          this.frameAction(this.history.resolve(payload, cssEscape) ?? payload, seq, at, time);
+        } else this.frameAction(payload, seq, at, time);
+        return;
       case "action.focus":
         this.omit("focus");
         return;
@@ -429,6 +440,70 @@ export class ScriptBuilder {
         return;
       default:
         this.push({ op: "comment", text: `seq ${seq} 暂不支持的操作类型 ${commentText(type, 60)}`, todo: true, seqs: [], at });
+    }
+  }
+  private frameAction(p: Rec, seq: number, at: number, time: number) {
+    const action = str(p.action);
+    if (action === "focusin" || (action === "scroll" && !this.options.includeScroll)) {
+      this.omit(action);
+      return;
+    }
+    const missing = (reason: string) => this.push({ op: "comment",
+      text: `seq ${seq} 跨域 iframe ${action}：${reason}`, todo: true, seqs: [seq], at });
+    const local = obj(p.target), path = p.framePath;
+    const valid = (v: unknown) => {
+      const hop = obj(v);
+      return !!str(hop.selector) && Array.isArray(hop.shadowPath) && hop.shadowPath.every(s => typeof s === "string" && !!s);
+    };
+    if (!Array.isArray(path) || !path.length || !path.every(valid) || !valid(local)) {
+      const last = this.last();
+      if (action === "submit" && last && hasTarget(last) && last.target.documentId === p.documentId &&
+          (last.op === "click" || (last.op === "press" && /(^|\+)Enter$/.test(last.key))) &&
+          Math.abs(time - last.at) <= SUBMIT_WINDOW_MS) {
+        last.seqs.push(seq);
+        return;
+      }
+      missing("记录缺少可验证的框架或元素定位器");
+      return;
+    }
+    const tag = str(p.element).toLowerCase();
+    const target = describeTarget({
+      nodeId: str(p.visualNodeId) || String(p.node), tagName: tag,
+      selector: local.selector, attributes: { type: local.inputType, ...(local.editable ? {contenteditable: "true"} : {}) },
+      scope: { frameContexts: path, shadowPath: local.shadowPath },
+    }, str(p.documentId))!;
+    switch (action) {
+      case "click":
+      case "dblclick":
+        this.click("action." + action, target, p, seq, at, time);
+        return;
+      case "submit":
+        this.submit(target, p, seq, at, time);
+        return;
+      case "keydown":
+        if (p.controlKey) this.key(target, { ...p, key: p.controlKey }, seq, time);
+        else if (target.editable || tag === "select") this.omit("unrecorded-key");
+        else missing("记录中没有可重放的键名");
+        return;
+      case "input":
+      case "change": {
+        if (target.type === "range" || target.type === "color") return missing("此控件需要手动设置测试值");
+        if (["checkbox", "radio"].includes(target.type) && typeof p.checked !== "boolean")
+          return missing("缺少勾选状态");
+        if (tag === "select" && !(Array.isArray(p.selectedIndices) && p.selectedIndices.every(i => Number.isSafeInteger(i) && i >= 0)))
+          return missing("缺少所选选项");
+        if (!target.editable && !["checkbox", "radio", "file"].includes(target.type) && tag !== "select")
+          return missing("控件缺少可重放的输入状态");
+        this.input(target, { form: { checked: p.checked, selectedIndices: p.selectedIndices } }, seq, at, time, action === "change", true);
+        return;
+      }
+      case "scroll": {
+        const {x, y} = obj(p.scroll);
+        if (num(x) === null || num(y) === null) return missing("缺少滚动位置");
+        this.push({ op: "scroll", target, x: Math.round(Number(x)), y: Math.round(Number(y)), seqs: [seq], at });
+        return;
+      }
+      default: missing("暂不支持此操作");
     }
   }
   private navigation(payload: Rec, seq: number, at: number) {
@@ -504,7 +579,8 @@ export class ScriptBuilder {
     const last = this.last();
     // Keyboard activation (Enter/Space on a button) and implicit form submission (Enter in a
     // field clicks the default button) dispatch a click with detail 0 that the press already causes.
-    if (detail === 0 && last?.op === "press" && ((last.target && last.target.key === target.key) || /(^|\+)Enter$/.test(last.key))) {
+    if (detail === 0 && last?.op === "press" && last.target?.documentId === target.documentId &&
+        (last.target.key === target.key || /(^|\+)Enter$/.test(last.key))) {
       last.seqs.push(seq);
       return;
     }
@@ -526,12 +602,12 @@ export class ScriptBuilder {
   private absorbLabelClick(step: TargetStep, time: number) {
     const index = this.steps.indexOf(step) - 1;
     const previous = this.steps[index];
-    if (previous?.op === "click" && previous.target.key !== step.target.key && Math.abs(time - previous.at) <= LABEL_CLICK_WINDOW_MS && !previous.modifiers.length && !previous.button) {
+    if (previous?.op === "click" && previous.target.documentId === step.target.documentId && previous.target.key !== step.target.key && Math.abs(time - previous.at) <= LABEL_CLICK_WINDOW_MS && !previous.modifiers.length && !previous.button) {
       this.steps.splice(index, 1);
       step.seqs.unshift(...previous.seqs);
     }
   }
-  private input(target: CodegenTarget | null, payload: Rec, seq: number, at: number, time: number, commit = false) {
+  private input(target: CodegenTarget | null, payload: Rec, seq: number, at: number, time: number, commit = false, parameterized = false) {
     const form = obj(payload.form);
     if (!target) {
       this.push({ op: "comment", text: `seq ${seq} 输入事件没有目标节点`, todo: true, seqs: [], at });
@@ -564,12 +640,14 @@ export class ScriptBuilder {
         : typeof form.value === "string"
           ? [form.value]
           : [];
+      const indices = Array.isArray(form.selectedIndices) ? form.selectedIndices as number[] : undefined;
       if (last?.op === "select" && sameTarget(last, target)) {
+        if (indices) last.indices = indices;
         last.values = values;
         last.seqs.push(seq);
         return;
       }
-      this.push({ op: "select", target, values, seqs: [seq], at: time });
+      this.push({ op: "select", target, values, ...(indices ? {indices} : {}), seqs: [seq], at: time });
       return;
     }
     if (formType === "file") {
@@ -592,7 +670,7 @@ export class ScriptBuilder {
             : typeof form.text === "string"
               ? form.text
               : "";
-    if (formType === "password") this.passwords = true;
+    if (formType === "password" && !parameterized) this.passwords = true;
     if (last?.op === "fill" && sameTarget(last, target)) {
       last.value = value;
       last.seqs.push(seq);
@@ -613,6 +691,7 @@ export class ScriptBuilder {
       step = { op: "fill", target, value, seqs: [seq], at: time };
       this.push(step);
     }
+    if (parameterized) step.parameter = `TRACEDOCK_INPUT_${seq}`;
     this.fills.set(target.key, step);
   }
   private key(target: CodegenTarget | null, payload: Rec, seq: number, time: number) {
@@ -653,14 +732,15 @@ export class ScriptBuilder {
     }
     const combo = [...modifiers, key === " " ? "Space" : key].join("+");
     const pageLevel = !target || target.documentTarget || target.tag === "body" || target.tag === "html";
-    this.push({ op: "press", target: pageLevel ? null : target, key: combo, seqs: [seq], at: time });
+    this.push({ op: "press", target: pageLevel && !target?.frames?.length ? null : target, key: combo, seqs: [seq], at: time });
   }
   private submit(target: CodegenTarget | null, payload: Rec, seq: number, at: number, time: number) {
     const last = this.last();
-    const submitter = describeTarget(payload.submitter, target?.key.split("|")[0] ?? "");
+    const submitter = describeTarget(payload.submitter, target?.documentId ?? "");
     if (
-      last &&
-      ((last.op === "click" && (!submitter || last.target.key === submitter.key || time - last.at <= SUBMIT_WINDOW_MS)) ||
+      last && target && hasTarget(last) && last.target.documentId === target.documentId &&
+      Math.abs(time - last.at) <= SUBMIT_WINDOW_MS &&
+      ((last.op === "click" && (!submitter || last.target.key === submitter.key || !target.frames?.length)) ||
         (last.op === "press" && /(^|\+)Enter$/.test(last.key)))
     ) {
       last.seqs.push(seq);
@@ -815,16 +895,24 @@ function renderSteps(d: Dialect, steps: Step[]): { lines: string[]; todos: numbe
           lines.push(`${d.await}${locator}.dblclick(${options(d, entries)})${d.end}`);
           break;
         }
-        case "fill":
-          lines.push(`${d.await}${locator}.fill(${d.quote(step.value)})${d.end}`);
+        case "fill": {
+          let value = d.quote(step.value);
+          if (step.parameter)
+            value = d.python ? `os.environ[${d.quote(step.parameter)}]` : `frameInput(${d.quote(step.parameter)})`;
+          lines.push(`${d.await}${locator}.fill(${value})${d.end}`);
           break;
+        }
         case "check":
         case "uncheck":
           lines.push(`${d.await}${locator}.${step.op}()${d.end}`);
           break;
-        case "select":
-          lines.push(`${d.await}${locator}.${d.method("selectOption")}(${step.values.length === 1 ? d.quote(step.values[0]!) : list(d, step.values)})${d.end}`);
+        case "select": {
+          let argument = step.values.length === 1 ? d.quote(step.values[0]!) : list(d, step.values);
+          if (step.indices)
+            argument = d.python ? `index=[${step.indices.join(", ")}]` : `[${step.indices.map(index => `{ index: ${index} }`).join(", ")}]`;
+          lines.push(`${d.await}${locator}.${d.method("selectOption")}(${argument})${d.end}`);
           break;
+        }
         case "press":
           lines.push(`${d.await}${locator}.press(${d.quote(step.key)})${d.end}`);
           break;
@@ -892,6 +980,7 @@ export function renderScript(
   const { lines, todos } = renderSteps(d, result.steps);
   const c = d.comment;
   const filename = scriptFilename(language);
+  const parameters = result.steps.flatMap(step => step.op === "fill" && step.parameter ? [step.parameter] : []);
   const header = [
     `${c} TraceDock · Playwright 自动化脚本（由采集记录生成）`,
     `${c} 采集记录：${commentText(recording.name, 200)}`,
@@ -902,6 +991,7 @@ export function renderScript(
     `${c} 运行：${language === "python" ? `pytest ${filename}（需要 pytest-playwright）` : `npx playwright test ${filename}`}`,
     `${c} 每个步骤上方的 seq 对应 timeline.jsonl 中的事件序号；定位器取自录制时的候选项，运行前请复核断言和等待条件。`,
     ...(result.passwords ? [`${c} 注意：脚本保留录制时的原始输入值（包括密码字段），分享前请自行处理。`] : []),
+    ...(parameters.length ? [`${c} 跨域输入使用测试数据，运行前请设置环境变量 ${parameters.join(", ")}。`] : []),
     ...result.warnings.map((w) => `${c} 注意：${commentText(w, 200)}`),
   ];
   if (!result.steps.some((s) => s.op !== "goto" && s.op !== "comment"))
@@ -914,6 +1004,7 @@ export function renderScript(
   if (language === "python") {
     code = [
       ...header,
+      ...(parameters.length ? ["import os"] : []),
       "from playwright.sync_api import Page, expect",
       "",
       "",
@@ -927,6 +1018,13 @@ export function renderScript(
       ...header,
       "import { test, expect } from '@playwright/test';",
       "",
+      ...(parameters.length ? [
+        "function frameInput(name: string): string {",
+        "  const value = process.env[name];",
+        "  if (value === undefined) throw new Error('缺少跨域输入测试数据 ' + name);",
+        "  return value;",
+        "}", "",
+      ] : []),
       `test(${tsString(recording.name || recording.id)}, async ({ page }) => {`,
       ...lines.map((line) => `  ${line}`),
       "});",

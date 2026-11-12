@@ -1,8 +1,9 @@
 import * as fs from "node:fs";
 import type { CodegenEvent } from "./generator";
 
-/** Event types that never contribute a script step; their (often huge) lines are skipped unparsed. */
-const SKIPPED = /^(?:dom\.|page\.resource$|page\.image$|page\.lifecycle$|page\.resize$)/;
+/** Legacy actions can need DOM evidence, but new recordings carry their own locators. */
+const DOM_HISTORY = /^(?:dom\.(?:snapshot|mutation)|frame\.(?:snapshot|mutation|detach))$/;
+const SKIPPED = /^(?:dom\.|page\.(?:resource|image|lifecycle|resize)$)/;
 const HEAD_BYTES = 256;
 const DEFAULT_MAX_LINE_BYTES = 32 * 1024 * 1024;
 
@@ -26,9 +27,7 @@ export interface CodegenReadStats {
 
 /**
  * Stream a timeline up to a captured byte boundary and yield only events that the
- * generator can use. DOM snapshots and mutations are recognised from their first
- * bytes and discarded without buffering, so memory stays bounded by the largest
- * kept action line.
+ * generator can use. Large DOM lines are skipped unless a legacy action needs them.
  */
 export async function* readCodegenEvents(
   timelinePath: string,
@@ -37,7 +36,8 @@ export async function* readCodegenEvents(
     signal,
     maxLineBytes = DEFAULT_MAX_LINE_BYTES,
     stats,
-  }: { signal?: AbortSignal | undefined; maxLineBytes?: number; stats?: CodegenReadStats } = {},
+    includeFrameHistory = false,
+  }: { signal?: AbortSignal | undefined; maxLineBytes?: number; stats?: CodegenReadStats; includeFrameHistory?: boolean } = {},
 ): AsyncGenerator<CodegenEvent> {
   aborted(signal);
   if (!Number.isSafeInteger(byteLength) || byteLength < 0) throw new Error("无效时间线读取范围");
@@ -46,12 +46,13 @@ export async function* readCodegenEvents(
   const input = fs.createReadStream(timelinePath, { start: 0, end: byteLength - 1, highWaterMark: 1024 * 1024 });
   type Mode = "head" | "keep" | "skip";
   let mode: Mode = "head" as Mode;
+  let gap = false;
   let parts: Buffer[] = [];
   let size = 0;
   let position = 0;
   const decide = () => {
     const type = leadingType(Buffer.concat(parts).toString("utf8"));
-    if (type !== null && SKIPPED.test(type)) {
+    if (type !== null && (DOM_HISTORY.test(type) ? !includeFrameHistory : SKIPPED.test(type))) {
       mode = "skip";
       parts = [];
       counters.skippedLines++;
@@ -72,6 +73,8 @@ export async function* readCodegenEvents(
         }
       }
     }
+    if (includeFrameHistory && (gap || (!event && mode === "keep" && size))) event = {type: "frame.historyGap"};
+    gap = false;
     mode = "head";
     parts = [];
     size = 0;
@@ -93,6 +96,7 @@ export async function* readCodegenEvents(
             mode = "skip";
             parts = [];
             counters.oversizedLines++;
+            gap = true;
           }
         } else if (mode === "skip") size += piece.length;
         position += end - cursor;

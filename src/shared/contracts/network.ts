@@ -59,6 +59,7 @@ export interface ConsoleFrame {
 }
 export type ConsoleLevel = "log" | "info" | "warn" | "error" | "debug";
 export interface ConsoleMessagePayload {
+  frameId?: string;
   level: ConsoleLevel;
   /** CDP console API name such as log, warning, error, assert, table. */
   method: string;
@@ -70,6 +71,7 @@ export interface ConsoleMessagePayload {
   stack?: ConsoleFrame[];
 }
 export interface ConsoleExceptionPayload {
+  frameId?: string;
   level: "error";
   text: string;
   textTruncated?: boolean;

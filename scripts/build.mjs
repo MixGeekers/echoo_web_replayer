@@ -58,6 +58,7 @@ await build({
   format: "iife",
   outdir: "out",
   entryPoints: {
+    "frame-visual": "src/recorder/frame-visual.ts",
     "renderer/app": "src/renderer/app.ts",
     "demo/demo": "src/demo/demo.ts",
   },

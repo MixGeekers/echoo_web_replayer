@@ -19,7 +19,7 @@ async function run() {
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>Offline Replay</title><link rel="stylesheet" href="/css/main.css"></head><body>
     <header><img id="logo" src="/img/logo.svg"><small>ECHOO / REPLAY</small><h1>A website, remembered.</h1><p id="subtitle">样式、图像和字体，随会话一起保存。</p></header>
     <main><label>记录一条想法 <input id="note"></label><button id="add">添加</button><output id="count">0</output><ul id="items"></ul><section id="end">滚动也被记录。</section></main>
-    <img hidden src="/missing.png"><script>window.executions=1;let count=0;document.querySelector('#add').onclick=()=>{document.querySelector('#count').textContent=++count;const li=document.createElement('li');li.textContent=document.querySelector('#note').value;document.querySelector('#items').append(li);if(count===1){const image=document.createElement('img');image.id='thumbnail';image.srcset='/img/logo.svg 1x';document.querySelector('main').append(image)}};</script></body></html>`;
+    <iframe id="outer"></iframe><img hidden src="/missing.png"><script>window.executions=1;let count=0;document.querySelector('#add').onclick=()=>{document.querySelector('#count').textContent=++count;const li=document.createElement('li');li.textContent=document.querySelector('#note').value;document.querySelector('#items').append(li);if(count===1){const image=document.createElement('img');image.id='thumbnail';image.srcset='/img/logo.svg 1x';document.querySelector('main').append(image)}};</script></body></html>`;
   const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="60" height="60"><rect width="60" height="60" rx="15" fill="#2563eb"/><path d="m22 16 22 14-22 14z" fill="white"/></svg>';
   const routes = {
     '/': ['text/html; charset=utf-8', html],
@@ -30,7 +30,16 @@ async function run() {
     ...(font ? { '/font.ttf': ['font/ttf', font] } : {}),
   };
   const server = http.createServer((request, response) => {
-    requestCount++; const route = routes[request.url];
+    requestCount++;
+    if (request.url === '/outer' || request.url === '/inner') {
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      return response.end(request.url === '/outer'
+        ? `<h2>嵌套表单</h2><img id="frame-logo" src="/img/logo.svg"><iframe id="inner" src="http://127.0.0.1:${server.address().port}/inner"></iframe><iframe id="sibling" src="http://127.0.0.1:${server.address().port}/inner"></iframe>`
+        : `<form><button>提交</button><output id="state" style="color:#b02730"></output></form>
+          <script>const msg=document.querySelector('output');msg.textContent=performance.getEntriesByType('navigation')[0].type==='reload'?'已刷新':'提交前';
+          document.querySelector('form').onsubmit=e=>{e.preventDefault();msg.textContent='字段错误'};</script>`);
+    }
+    const route = routes[request.url];
     response.writeHead(route ? 200 : 404, { 'Content-Type': route?.[0] || 'text/plain' }); response.end(route?.[1] || 'missing');
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -55,6 +64,9 @@ async function run() {
     await guest.waitForURL(`${origin}/`);
     await guest.waitForFunction(() => document.querySelector('#logo')?.naturalWidth === 60);
     if (font) await guest.evaluate(() => document.fonts.load('16px ReplayTest'));
+    await guest.locator('#outer').evaluate((el, src) => { el.src = src; }, origin.replace('127.0.0.1', 'localhost') + '/outer');
+    const form = guest.frameLocator('#outer').frameLocator('#inner');
+    await form.locator('#state').filter({hasText:'提交前'}).waitFor();
     await ui.locator('#new-session-button').click();
     await ui.locator('#management-name').fill('离线回放 Session');
     await ui.locator('#management-confirm').click();
@@ -66,13 +78,42 @@ async function run() {
     await guest.waitForTimeout(1000);
     await guest.locator('#note').fill('原网站关闭后继续回放'); await guest.locator('#add').click();
     await guest.locator('#end').scrollIntoViewIfNeeded(); await guest.waitForTimeout(180);
+    async function visualTime(label) {
+      const deadline = Date.now() + 10000;
+      while (Date.now() < deadline) {
+        const at = await ui.evaluate(async label => {
+          const sessionId = (await window.collector.getState()).session.id;
+          const result = await window.collector.getTimeline({sessionId, limit: 300});
+          for (const event of result.events.filter(e => e.type === 'frame.snapshot' || e.type === 'frame.mutation')) {
+            const full = await window.collector.getEvent({sessionId, eventId: event.id});
+            if (full.payload.nodes.some(n => n.text === label)) return event.elapsedMs;
+          }
+        }, label);
+        if (at !== undefined) return await ui.evaluate(async () => (await window.collector.getState()).session.lastElapsedMs);
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      throw new Error('missing iframe state: ' + label);
+    }
+    await form.locator('output').filter({ hasText: '提交前' }).waitFor();
+    const beforeSubmit = await visualTime('提交前');
+    await form.locator('button').click();
+    const afterError = await visualTime('字段错误');
+    // A root checkpoint between two frame versions must contain a usable frame baseline.
+    await ui.evaluate(() => window.collector.snapshot());
+    const checkpoint = await ui.evaluate(async () => (await window.collector.getState()).session.lastElapsedMs);
+    await form.locator('html').evaluate(() => location.reload());
+    await form.locator('output').filter({ hasText: '已刷新' }).waitFor();
+    const afterRefresh = await visualTime('已刷新');
     await ui.locator('#stop-button').click();
     await ui.waitForFunction(async () => (await window.collector.getState()).session.status === 'stopped');
     const state = await ui.evaluate(() => window.collector.getState());
     const events = (await ui.evaluate(sessionId => window.collector.getTimeline({ sessionId, limit: 200 }), state.session.id)).events;
     const resourceStatus = await ui.evaluate(sessionId => window.collector.replayResources({ sessionId }), state.session.id);
-    assert.equal(resourceStatus.saved, font ? 5 : 4); assert.equal(resourceStatus.missing, 1); assert.deepEqual(resourceStatus.missingURLs, [`${origin}/missing.png`]);
+    assert.equal(resourceStatus.saved, font ? 6 : 5); assert.equal(resourceStatus.missing, 1); assert.deepEqual(resourceStatus.missingURLs, [`${origin}/missing.png`]);
+    await guest.goto('about:blank');
     server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); const beforeReplay = requestCount;
+    const replayRequests = [];
+    desktop.context().on('request', request => { if (/^https?:/.test(request.url())) replayRequests.push(request.url()); });
     await ui.locator('#replay-button').click();
     await ui.waitForFunction(() => !document.querySelector('#replay-play').disabled && document.querySelector('#replay-frame').contentDocument.querySelector('#logo')?.naturalWidth === 60);
     const style = await ui.evaluate(async hasFont => {
@@ -85,12 +126,39 @@ async function run() {
     }, Boolean(font));
     assert.equal(style.color, 'rgb(37, 99, 235)'); assert.match(style.background, /tracedock-resource:/);
     assert.equal(style.font, true); assert.equal(style.scripts, 0); assert.equal(style.executed, undefined); assert.equal(style.count, '0');
+    async function seekFrame(time, text) {
+      await ui.locator('#replay-progress').evaluate((slider, at) => {
+        slider.value = String(at);
+        slider.dispatchEvent(new Event('input', {bubbles:true}));
+      }, time);
+      await ui.waitForFunction(text => {
+        const doc = document.querySelector('#replay-frame').contentDocument;
+        const inner = doc.querySelector('#outer')?.contentDocument?.querySelector('#inner')?.contentDocument;
+        const node = inner?.querySelector('#state');
+        return !document.querySelector('#replay-play').disabled && node?.textContent === text &&
+          doc.querySelector('#outer').contentDocument.querySelector('#frame-logo')?.naturalWidth === 60 &&
+          doc.querySelector('#outer').contentDocument.querySelector('#sibling')?.contentDocument?.querySelector('#state')?.textContent === '提交前' &&
+          inner.defaultView.getComputedStyle(node).color === 'rgb(176, 39, 48)' && !inner.querySelector('script');
+      }, text, {timeout: 10000}).catch(async error => {
+        const view = await ui.evaluate(() => {
+          const doc = document.querySelector('#replay-frame').contentDocument;
+          const outer = doc.querySelector('#outer')?.contentDocument;
+          return [document.querySelector('#replay-progress').value, document.querySelector('#replay-message').textContent, outer?.body?.innerText, outer?.querySelector('#inner')?.contentDocument?.body?.innerText];
+        });
+        throw new Error(`seek ${time} expected ${text}: ${JSON.stringify(view)} (${error.message})`);
+      });
+    }
+    for (const [time, text] of [[afterRefresh, '已刷新'], [checkpoint, '字段错误'], [beforeSubmit, '提交前'], [afterError, '字段错误']])
+      await seekFrame(time, text);
+    await ui.locator('#replay-restart').click();
+    await ui.waitForFunction(() => !document.querySelector('#replay-play').disabled &&
+      document.querySelector('#replay-frame').contentDocument.querySelector('#count')?.textContent === '0');
     await ui.locator('#replay-play').click();
     await ui.waitForFunction(() => Number(document.querySelector('#replay-progress').value) > 100);
     await ui.locator('#replay-play').click(); await ui.waitForFunction(() => document.querySelector('#replay-play').textContent === '播放');
     const paused = await ui.locator('#replay-progress').inputValue(); await ui.waitForTimeout(120);
     assert.equal(await ui.locator('#replay-progress').inputValue(), paused);
-    const mutation = events.find(event => event.type === 'dom.mutation');
+    const mutation = events.find(event => event.type === 'dom.mutation' && event.elapsedMs < afterError);
     await ui.locator('.timeline-event').filter({ hasText: `#${String(mutation.seq).padStart(4, '0')}` }).click();
     await ui.waitForFunction(() => !document.querySelector('#replay-play').disabled && document.querySelector('#replay-frame').contentDocument.querySelector('#count')?.textContent === '2');
     assert.equal(await ui.evaluate(() => document.querySelector('#replay-frame').contentDocument.querySelector('#items').children.length), 2);
@@ -107,9 +175,10 @@ async function run() {
     await ui.locator('#close-detail-button').click(); if (await ui.locator('#toast-close').isVisible()) await ui.locator('#toast-close').click();
     const screenshot = await desktop.evaluate(async ({ BrowserWindow }) => { const win = BrowserWindow.getAllWindows()[0]; const [width, height] = win.getContentSize(); return (await win.capturePage()).resize({ width, height }).toPNG(); });
     await fs.writeFile(path.join(output, 'offline-replay.png'), Buffer.from(screenshot));
+    assert.deepEqual(replayRequests, []);
     assert.equal(requestCount, beforeReplay); assert.deepEqual(errors, []);
     await ui.locator('#replay-close').click(); assert.equal(await ui.locator('#replay-panel').isHidden(), true);
-    const report = { status: 'passed', originClosed: true, extraOriginRequests: requestCount - beforeReplay, resources: resourceStatus, fontTested: Boolean(font), rendererErrors: errors, output };
+    const report = { status: 'passed', originClosed: true, nestedFrameSeek: { beforeSubmit, afterError, checkpoint, afterRefresh, identicalUrlSiblingVerified: true }, extraOriginRequests: requestCount - beforeReplay, resources: resourceStatus, fontTested: Boolean(font), rendererErrors: errors, output };
     await fs.writeFile(path.join(output, 'report.json'), JSON.stringify(report, null, 2));
     console.log(JSON.stringify(report, null, 2));
   } finally { await desktop?.close(); server.closeAllConnections(); server.close(); }

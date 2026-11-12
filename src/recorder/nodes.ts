@@ -137,6 +137,11 @@ export class NodeRegistry {
     }
     return path;
   }
+  frameSelector(element: Element) {
+    const selector = this.selector(element), shadowPath = this.shadowPath(element);
+    if (!selector || !shadowPath.every((s): s is string => !!s)) return null;
+    return { selector, shadowPath };
+  }
   scope(node: Node | null | undefined): Scope {
     const cache = this.cache;
     if (!node || !cache) return this.computeScope(node);

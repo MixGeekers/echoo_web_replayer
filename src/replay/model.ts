@@ -1,3 +1,4 @@
+import type { FrameVisual, FramePatch } from "../shared/frame-visual";
 import type {
   FormState,
   Point,
@@ -19,6 +20,7 @@ export type ReplayDocument = Pick<DocumentSnapshot, "tree"> &
     Pick<DocumentSnapshot, "url" | "baseUrl" | "scroll" | "viewport" | "scope">
   > & { forms?: ReplayForm[]; scrolls?: (Point & { nodeId: string })[] };
 export interface ReplaySnapshot extends ReplayDocument {
+  frameDocuments?: FrameVisual[];
   frames?: ReplayDocument[];
   frameHosts?: (string | null)[];
   frameDepths?: number[];
@@ -41,6 +43,9 @@ export interface ReplayPointer {
   seeking?: boolean;
 }
 interface Payloads {
+  "frame.snapshot": FrameVisual;
+  "frame.mutation": FramePatch;
+  "frame.detach": { documentId: string };
   "dom.snapshot": ReplaySnapshot;
   "dom.mutation": { records: ReplayMutation[] };
   "session.pause": null;
@@ -214,6 +219,7 @@ export function decodeSnapshot(
     frames = array(v.frames);
   return {
     ...decodeDocument(value),
+    frameDocuments: array(v.frameDocuments).map(decodeVisual),
     frames: frames.map(decodeDocument),
     frameDepths: frames.map(
       (x) => array(object(object(x).scope).frameContexts).length,
@@ -229,6 +235,19 @@ export function decodeSnapshot(
     })),
   };
 }
+function decodePatch(p: Record<string, unknown>): FramePatch {
+  if (typeof p.documentId !== "string" || !Array.isArray(p.nodes) ||
+      !p.nodes.every(node => typeof node.nodeId === "string" && strings(node.children)) ||
+      (p.removed !== undefined && !strings(p.removed)))
+    throw new Error("iframe 节点记录无效");
+  return { documentId: p.documentId, nodes: p.nodes, removed: p.removed ?? [] };
+}
+function decodeVisual(value: unknown): FrameVisual {
+  const p = object(value);
+  const { documentId, nodes } = decodePatch(p);
+  return { frameId: string(p.frameId), documentId, nodes, url: string(p.url), baseUrl: string(p.baseUrl, string(p.url)),
+    parentDocumentId: string(p.parentDocumentId), hostNodeId: string(p.hostNodeId) };
+}
 export function decodeReplayEvent(event: StoredEvent): ReplayEvent | null {
   const p = object(event.payload),
     meta = {
@@ -242,6 +261,12 @@ export function decodeReplayEvent(event: StoredEvent): ReplayEvent | null {
       ? string(object(p.target).nodeId)
       : null;
   switch (event.type) {
+    case "frame.snapshot":
+      return { ...meta, type: event.type, payload: decodeVisual(p) };
+    case "frame.mutation":
+      return { ...meta, type: event.type, payload: decodePatch(p) };
+    case "frame.detach":
+      return { ...meta, type: event.type, payload: { documentId: string(p.documentId) } };
     case "dom.snapshot":
       return { ...meta, type: event.type, payload: decodeSnapshot(p) };
     case "session.pause":
