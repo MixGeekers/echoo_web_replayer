@@ -107,6 +107,46 @@ jobs:
             output/resource-navigation-smoke-*/report.json
             output/export-desktop-*/summary.json
 
+  features:
+    name: Network, annotations and codegen acceptance
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Install Chromium for generated script execution
+        timeout-minutes: 5
+        run: npx --no-install playwright-core install chromium --only-shell
+      - name: Verify network and console capture and recording boundaries
+        timeout-minutes: 4
+        run: npm run test:network
+      - name: Verify bookmarks, annotations and range exports
+        timeout-minutes: 4
+        run: npm run test:annotations
+      - name: Verify generated scripts, exports and Chromium execution
+        timeout-minutes: 5
+        run: npm run test:codegen
+      - name: Upload feature desktop reports
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: windows-feature-desktop-reports
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            output/screens/feature-*.png
+            output/feature-network-electron.log
+            output/feature-annotations-*/electron.log
+            output/playwright/codegen-*/electron.log
+
   package:
     name: Portable build
     runs-on: windows-latest

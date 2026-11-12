@@ -34,6 +34,7 @@ export class ResourceCapture {
   private readonly requests = new Map<string, RequestOwner>();
   private readonly loaderGenerations = new Map<string, number>();
   private readonly frameGenerations = new Map<string, number>();
+  private childSessions = new Set<string>();
   private mainLoaderId: string | undefined;
   private sessionStartGeneration = 0;
   private readonly pending = new Map<string, PendingEntry>();
@@ -55,9 +56,7 @@ export class ResourceCapture {
     this.cache = await fs.mkdtemp(path.join(root, ".resource-cache-"));
     try {
       const debug = this.debugLease = acquireBrowserDebugger(this.host);
-      debug.onMessage((method, params: unknown) =>
-        this.onMessage(method, params),
-      );
+      debug.onMessage((method, params, session) => this.onMessage(method, params, session), true);
       debug.onDetach((reason) => {
         this.error = `静态资源采集已断开：${reason}`;
         this.changed();
@@ -125,8 +124,22 @@ export class ResourceCapture {
       this.rememberLoader(loaderId, this.generation);
     }
   }
-  onMessage(method: string, value: unknown): void {
+  onMessage(method: string, value: unknown, session?: string): void {
     const params = object(value);
+    if (session && !this.childSessions.has(session)) return;
+    if (method === "Target.attachedToTarget" && object(params.targetInfo).type === "iframe" && typeof params.sessionId === "string") {
+      this.childSessions.add(params.sessionId);
+      return;
+    }
+    if (method === "Target.detachedFromTarget" && typeof params.sessionId === "string") {
+      this.childSessions.delete(params.sessionId);
+      const prefix = params.sessionId + ":";
+      for (const key of this.requests.keys()) if (key.startsWith(prefix)) {
+        this.requests.delete(key);
+        this.pending.delete(key);
+      }
+      return;
+    }
     if (method === "Page.frameAttached") {
       if (
         typeof params.frameId === "string" &&
@@ -142,7 +155,7 @@ export class ResourceCapture {
     if (method === "Page.frameNavigated") {
       const frame = object(params.frame);
       if (typeof frame.id !== "string") return;
-      if (!frame.parentId) {
+      if (!session && !frame.parentId) {
         this.navigate(frame.id, frame.loaderId);
         // A new top document owns its frame only after commit. Until then the
         // outgoing page can still create/navigate child frames (including srcdoc).
@@ -156,7 +169,8 @@ export class ResourceCapture {
       return;
     }
     if (typeof params.requestId !== "string") return;
-    const requestId = params.requestId;
+    const rawId = params.requestId;
+    const requestId = session ? session + ":" + rawId : rawId;
     if (method === "Network.requestWillBeSent") {
       // Redirects reuse requestId. Keep its initial ownership, including when
       // the redirect arrives after navigation or a recording-session change.
@@ -260,7 +274,7 @@ export class ResourceCapture {
         const debug = this.debugLease;
         if (!debug || !this.cache) throw new Error("静态资源采集尚未初始化");
         const response = object(
-          await debug.sendCommand("Network.getResponseBody", { requestId }),
+          await debug.sendCommand("Network.getResponseBody", { requestId: rawId }, session),
         );
         if (typeof response.body !== "string")
           throw new Error("无效的资源响应");

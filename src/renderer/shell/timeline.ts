@@ -55,6 +55,7 @@ export function createTimeline(
   function eventPresentation(event: EventPreview): [string, string, string] {
     const type = event.type || "";
     const descriptions: Record<string, [string, string, string]> = {
+      "action.frame": ["iframe 操作", "click", "action"],
       "action.click": ["点击元素", "click", "action"],
       "action.dblclick": ["双击元素", "click", "action"],
       "action.input": ["输入内容", "input", "action"],
@@ -63,6 +64,9 @@ export function createTimeline(
       "action.submit": ["提交表单", "arrow-right", "action"],
       "action.focus": ["聚焦元素", "click", "action"],
       "action.scroll": ["滚动页面", "scroll", "action"],
+      "frame.snapshot": ["iframe 快照", "camera", "snapshot"],
+      "frame.mutation": ["iframe DOM 变化", "code", "dom"],
+      "frame.detach": ["iframe 文档卸载", "code", "dom"],
       "dom.mutation": ["DOM 变化", "code", "dom"],
       "dom.snapshot": ["页面快照", "camera", "snapshot"],
       "page.navigation": ["页面导航", "globe", "page"],
@@ -218,9 +222,12 @@ export function createTimeline(
 
   function timelineRequest(): TimelineQuery {
     if (!selectedSessionId) throw new Error("尚未选择采集记录");
+    const types = [filter];
+    if (filter === "dom.snapshot") types.push("frame.snapshot");
+    if (filter === "dom.mutation") types.push("frame.mutation");
     return {
       sessionId: selectedSessionId,
-      ...(filter !== "all" ? { types: [filter] } : {}),
+      ...(filter !== "all" ? { types } : {}),
       ...(search ? { query: search } : {}),
     };
   }

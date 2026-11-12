@@ -1,3 +1,4 @@
+import { FrameArchive, visualTree } from "../shared/frame-visual";
 import { resourceURL, cssText } from "../shared/resource-urls";
 import type { SerializedNode, Point } from "../shared/contracts/recording";
 import type {
@@ -53,6 +54,8 @@ function textOf(node: SerializedNode): string {
     : "";
 }
 export class ReplayDOM {
+  private frames = new FrameArchive();
+  private mounted = new Map<string, Document>();
   private nodes = new Map<string, Node>();
   private bindings = new Map<Node, Map<string, string>>();
   private scrolls = new Map<Node, Point>();
@@ -91,6 +94,8 @@ export class ReplayDOM {
     this.endSeq = endSeq;
     this.documentId = null;
     this.gaps = 0;
+    this.frames.clear();
+    this.mounted.clear();
     this.nodes.clear();
     this.bindings.clear();
     this.scrolls.clear();
@@ -329,6 +334,8 @@ export class ReplayDOM {
     event: Extract<ReplayEvent, { type: "dom.snapshot" }>,
     at = event.seq,
   ): void {
+    this.frames.clear();
+    this.mounted.clear();
     this.nodes.clear();
     this.bindings.clear();
     this.scrolls.clear();
@@ -357,9 +364,50 @@ export class ReplayDOM {
         this.rebuildDocument(host.contentDocument, frame);
       else this.gaps++;
     }
+    for (const frame of payload.frameDocuments || []) this.frames.set(frame);
+    this.mountFrames();
     for (const shadow of payload.shadowRoots || [])
       for (const form of shadow.forms) this.form(form);
     this.restoreScroll();
+  }
+  private unmount(id: string) {
+    const doc = this.mounted.get(id);
+    if (!doc) return;
+    doc.replaceChildren();
+    this.mounted.delete(id);
+    this.scrolls.delete(doc);
+    for (const [key, node] of this.nodes) {
+      if (node === doc || node.ownerDocument === doc) {
+        this.nodes.delete(key);
+        this.scrolls.delete(node);
+        this.bindings.delete(node);
+      }
+    }
+  }
+  private mountFrames() {
+    if (!this.documentId) return;
+    const frames = this.frames.snapshots();
+    for (const id of this.mounted.keys()) if (!this.frames.has(id)) this.unmount(id);
+    // A child snapshot can arrive before its parent's snapshot or host insertion.
+    const mount = (parent: string) => {
+      for (const frame of frames) {
+        if (frame.parentDocumentId !== parent) continue;
+        const host = this.nodes.get(frame.hostNodeId);
+        if (!(html(host, "iframe") || html(host, "frame")) || !host.isConnected || !host.contentDocument) continue;
+        const doc = host.contentDocument;
+        if (this.mounted.get(frame.documentId) !== doc) {
+          this.unmount(frame.documentId);
+          const tree = visualTree(frame);
+          if (!tree) continue;
+          const scrolls = frame.nodes.flatMap(node => node.scroll ? [{ nodeId: node.nodeId, ...node.scroll }] : []);
+          this.rebuildDocument(doc, { tree, url: frame.url, baseUrl: frame.baseUrl || frame.url, scrolls });
+          this.restoreScroll();
+          this.mounted.set(frame.documentId, doc);
+        }
+        mount(frame.documentId);
+      }
+    };
+    mount(this.documentId);
   }
   private form(state: ReplayForm): void {
     const node = this.nodes.get(state.nodeId);
@@ -421,6 +469,15 @@ export class ReplayDOM {
       this.snapshot(event, seeking ? this.at : event.seq);
       return;
     }
+    if (event.type === "frame.snapshot" || event.type === "frame.mutation" || event.type === "frame.detach") {
+      const { documentId } = event.payload;
+      this.unmount(documentId);
+      if (event.type === "frame.snapshot") this.frames.set(event.payload);
+      else if (event.type === "frame.mutation") this.frames.patch(event.payload);
+      else this.frames.forget(documentId);
+      this.mountFrames();
+      return;
+    }
     if (event.type === "session.pause") {
       this.onView({ message: "采集已暂停 · 此区间没有页面记录" });
       return;
@@ -435,6 +492,8 @@ export class ReplayDOM {
     }
     if (event.type === "page.navigation" && !event.payload.sameDocument) {
       this.doc.body?.replaceChildren();
+      this.frames.clear();
+      this.mounted.clear();
       this.nodes.clear();
       this.bindings.clear();
       this.scrolls.clear();
@@ -513,6 +572,7 @@ export class ReplayDOM {
           this.scrolls.delete(node);
         }
     }
+    if (event.type === "dom.mutation") this.mountFrames();
     if (
       (event.type === "action.input" || event.type === "action.change") &&
       event.payload.form

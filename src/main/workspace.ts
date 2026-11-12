@@ -180,8 +180,8 @@ export async function createWorkspace(win: BrowserWindow, demoURL: string) {
       error:message=>console.error("[TraceDock]",message),
     });
     // Network/console capture opens and closes with the same recording boundaries as resources.
-    const capture = {start:async(id:string|null)=>{await resources.start(id);network.start();},stop:async()=>{await network.stop();await resources.stop();}};
-    const recording = createRecordingController({store,resources:capture,browser,browserState,profile:()=>profiles.get(id),
+    const capture = {start:async(id:string|null)=>{await resources.start(id);await network.start();},stop:async()=>{await network.stop();await resources.stop();}};
+    const recording = createRecordingController({store,frameDocuments:doc=>network.archive.snapshots(doc),flushFrameDocuments:()=>network.flushFrameDocuments(),resources:capture,browser,browserState,profile:()=>profiles.get(id),
       appVersion:app.getVersion(),notify,notifyLater,reportError,publish:event => {
         if(!win.isDestroyed()) win.webContents.send("collector:event",event);
       }});

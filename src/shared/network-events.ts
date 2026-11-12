@@ -485,6 +485,7 @@ export function formatNetworkDetail(type: string, payload: unknown): string | nu
         .join(" · "),
       `请求 ID：${str(p.requestId)} · 开始：${str(p.startedAt)}`,
     ];
+    if (p.frameId) lines.push(`Frame ID：${str(p.frameId)}`);
     if (type === "network.failed")
       lines.push(`错误：${str(p.errorText)}${p.canceled === true ? "（已取消）" : ""}${p.blockedReason ? ` · ${str(p.blockedReason)}` : ""}`);
     const blocks = [lines.filter(Boolean).join("\n")];
@@ -504,7 +505,7 @@ export function formatNetworkDetail(type: string, payload: unknown): string | nu
       : `console.${str(p.method, "log")} · ${str(p.level, "log")}`;
     const where = p.url ? `\n来源：${str(p.url)}${p.line ? `:${String(p.line)}:${String(p.column ?? "")}` : ""}` : "";
     const stackText = typeof p.stackText === "string" ? `\n\n── 错误堆栈 ──\n${p.stackText}` : "";
-    return `${head}${where}\n\n${str(p.text)}${p.textTruncated === true ? "\n…（消息已截断）" : ""}${stackText}${stackText ? "" : frameBlock(p.stack)}`;
+    return `${head}${where}${p.frameId ? `\nFrame ID：${str(p.frameId)}` : ""}\n\n${str(p.text)}${p.textTruncated === true ? "\n…（消息已截断）" : ""}${stackText}${stackText ? "" : frameBlock(p.stack)}`;
   }
   return null;
 }

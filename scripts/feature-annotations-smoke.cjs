@@ -1,7 +1,7 @@
 'use strict';
 
 // Real desktop acceptance for timeline bookmarks, notes and range export.
-// Run after `npm run compile`; on Linux use `xvfb-run -a node scripts/feature-annotations-smoke.cjs`.
+// Run with `npm run test:annotations`; on Linux use `xvfb-run -a npm run test:annotations`.
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
@@ -243,6 +243,9 @@ run().catch(async error => {
   if (logs.length) console.error(logs.join('').slice(-4000));
   if (errors.length) console.error(errors.join('\n'));
   try { if (desktop) await screenshot('feature-annotations-failure.png'); } catch {}
-  await desktop?.close().catch(() => {});
   process.exitCode = 1;
+}).finally(async () => {
+  await desktop?.close().catch(() => {});
+  await fs.mkdir(work, { recursive: true });
+  await fs.writeFile(path.join(work, 'electron.log'), logs.join(''));
 });

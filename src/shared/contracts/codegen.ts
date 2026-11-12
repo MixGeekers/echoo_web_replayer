@@ -10,7 +10,7 @@ export interface CodegenOptions {
   maxSteps?: number | undefined;
 }
 export interface CodegenStats {
-  /** Events read from the timeline (DOM snapshots/mutations are skipped before parsing). */
+  /** Timeline events considered, including DOM lines skipped by the streaming reader. */
   events: number;
   actions: number;
   steps: number;

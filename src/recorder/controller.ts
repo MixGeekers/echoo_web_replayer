@@ -40,6 +40,18 @@ export class RecorderController {
   private stateVersion = 0;
   private initialSnapshotPending = false;
   private discoveryTimer: ReturnType<typeof setInterval> | null = null;
+  frameOwner(host: Element) {
+    if (host.localName !== "iframe" && host.localName !== "frame") return null;
+    let doc = host.ownerDocument;
+    while (doc !== document) {
+      const parent = doc.defaultView?.frameElement;
+      if (!parent) return null;
+      doc = parent.ownerDocument;
+    }
+    const local = this.nodes.frameSelector(host);
+    const path = this.nodes.scope(host).frameContexts.map(({selector, shadowPath}) => ({ selector, shadowPath }));
+    return { parentDocumentId: this.documentId, hostNodeId: this.nodes.id(host), hostPath: local ? [...path, local] : null };
+  }
   get version(): number {
     return this.stateVersion;
   }

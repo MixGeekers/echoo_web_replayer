@@ -28,7 +28,7 @@ export interface CodegenStore {
   capture(sessionId: string): Promise<CodegenCapture>;
 }
 
-/** Stream one captured timeline boundary into a script. Memory is bounded by the step list. */
+/** Stream one captured timeline boundary into a script. Older recordings may also need the current frame DOM index. */
 export async function generateFromTimeline(
   capture: CodegenCapture,
   options: CodegenOptions & { signal?: AbortSignal | undefined } = {},
@@ -39,10 +39,17 @@ export async function generateFromTimeline(
     url: capture.metadata.url,
     startedAt: capture.metadata.startedAt,
   };
-  const builder = new ScriptBuilder(recording, options);
-  const stats: CodegenReadStats = { skippedLines: 0, oversizedLines: 0, invalidLines: 0 };
+  let builder = new ScriptBuilder(recording, options);
+  let stats: CodegenReadStats = { skippedLines: 0, oversizedLines: 0, invalidLines: 0 };
   for await (const event of readCodegenEvents(capture.timelinePath, capture.byteLength, { signal: options.signal, stats }))
     builder.add(event);
+  if (builder.needsFrameHistory) {
+    // Pay for parsing historical DOM only when an action actually needs it.
+    builder = new ScriptBuilder(recording, options);
+    stats = { skippedLines: 0, oversizedLines: 0, invalidLines: 0 };
+    for await (const event of readCodegenEvents(capture.timelinePath, capture.byteLength, {signal: options.signal, stats, includeFrameHistory: true}))
+      builder.add(event);
+  }
   const result = renderScript(recording, builder, options);
   if (stats.oversizedLines)
     result.warnings.push(`${stats.oversizedLines} 条超大事件未参与生成，请在时间线中核对。`);

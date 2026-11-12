@@ -8,6 +8,8 @@ import { errorMessage, object } from "../shared/runtime";
 import type { BrowserState, EventNotice } from "../shared/contracts/ui";
 export type { BrowserState } from "../shared/contracts/ui";
 interface Options {
+  flushFrameDocuments?: () => Promise<void>;
+  frameDocuments?: (documentId: string) => import("../shared/frame-visual").FrameVisual[];
   store: SessionStore;
   resources: Pick<ResourceRecorder, "start" | "stop">;
   browser: WebContentsView;
@@ -22,6 +24,8 @@ interface Options {
 }
 export function createRecordingController({
   store,
+  frameDocuments,
+  flushFrameDocuments,
   resources,
   browser,
   browserState,
@@ -139,6 +143,7 @@ export function createRecordingController({
   }
   async function checkpoint(command: string, reason: string) {
     try {
+      await flushFrameDocuments?.();
       await recorderCommand(command, reason);
       return true;
     } catch (error) {
@@ -263,7 +268,18 @@ export function createRecordingController({
     const extra: Omit<EventInput, "type" | "payload"> = {};
     for (const key of ["timestamp", "documentId", "url", "title"] as const)
       if (typeof envelope[key] === "string") extra[key] = envelope[key];
-    persist(envelope.type, envelope.payload, extra).catch(reportError);
+    let payload = envelope.payload;
+    if (envelope.type === "dom.snapshot" && frameDocuments && typeof envelope.documentId === "string") {
+      const frames = frameDocuments(envelope.documentId);
+      if (frames.length) {
+        const snapshot = object(payload);
+        payload = {
+          ...snapshot, frameDocuments: frames,
+          coverage: { ...object(snapshot.coverage), crossOriginFrameVisuals: frames.length },
+        };
+      }
+    }
+    persist(envelope.type, payload, extra).catch(reportError);
   }
   return {
     currentSession,

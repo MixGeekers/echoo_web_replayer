@@ -11,6 +11,9 @@ const jobs = [
   "test:mcp",
   "test:replay",
   "test:resource-navigation",
+  "test:network",
+  "test:annotations",
+  "test:codegen",
   "test:export-desktop",
   "test:large",
 ];

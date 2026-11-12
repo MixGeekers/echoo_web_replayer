@@ -62,6 +62,18 @@ function entriesOf(zip) {
   const archive = new AdmZip(zip);
   return new Map(archive.getEntries().filter(e => !e.isDirectory).map(e => [e.entryName, archive.readFile(e)]));
 }
+async function withWindowsRename(t, target, replace, run) {
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+  const rename = fs.rename;
+  const mock = t.mock.method(fs, 'rename', (source, destination) =>
+    destination === target ? replace(source, destination, rename) : rename(source, destination));
+  Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
+  try { return await run(); }
+  finally {
+    mock.mock.restore();
+    Object.defineProperty(process, 'platform', platform);
+  }
+}
 async function restore(source, output, extra = []) {
   return exec(python, [script, source, '--output', output, ...extra], { timeout: 120000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 });
 }
@@ -115,6 +127,56 @@ test('annotation store creates, edits and deletes notes atomically with revision
   assert.deepEqual(await fs.readFile(path.join(store.getSessionDirectory(id), 'timeline.jsonl')), timelineBefore, 'timeline facts are never modified');
   assert.equal(store.getSession(id).eventCount, 9);
 });
+
+test('transient Windows annotation replacement locks preserve the old file until the retry succeeds', async t => {
+  const directory = await setup(t);
+  const { store, id } = await recording(directory);
+  const annotations = new AnnotationStore(store);
+  const created = await annotations.create(id, { seq: 2, elapsedMs: 0, timestamp: '', eventType: 'action.click', text: 'before', author: 'user' });
+  const file = path.join(store.getSessionDirectory(id), 'annotations.json');
+  const before = await fs.readFile(file);
+  const locks = ['EPERM', 'EACCES', 'EBUSY'];
+  let attempts = 0;
+  await withWindowsRename(t, file, async (source, destination, rename) => {
+    const code = locks[attempts++];
+    if (code) {
+      assert.deepEqual(await fs.readFile(file), before, 'the committed file stays readable during retries');
+      throw Object.assign(new Error('Windows file lock'), { code });
+    }
+    return rename(source, destination);
+  }, async () => {
+    const updated = await annotations.update(id, created.annotation.id, { text: 'after' }, 1);
+    assert.equal(updated.revision, 2);
+    assert.equal(updated.annotation.text, 'after');
+  });
+  assert.equal(attempts, locks.length + 1);
+  assert.equal((await annotations.read(id)).annotations[0].text, 'after');
+  assert.deepEqual((await fs.readdir(store.getSessionDirectory(id))).filter(name => name.endsWith('.tmp')), []);
+});
+
+for (const code of ['EPERM', 'ENOSPC']) {
+  test(`a failed Windows annotation replacement (${code}) preserves the committed revision and cleans staging`, async t => {
+    const directory = await setup(t);
+    const { store, id } = await recording(directory);
+    const annotations = new AnnotationStore(store);
+    const created = await annotations.create(id, { seq: 2, elapsedMs: 0, timestamp: '', eventType: 'action.click', text: 'before', author: 'user' });
+    const file = path.join(store.getSessionDirectory(id), 'annotations.json');
+    const before = await fs.readFile(file);
+    let attempts = 0;
+    await withWindowsRename(t, file, async () => {
+      attempts++;
+      throw Object.assign(new Error('replacement failed'), { code });
+    }, async () => {
+      await assert.rejects(annotations.update(id, created.annotation.id, { text: 'lost update' }, 1), { code });
+    });
+    if (code === 'EPERM') assert.ok(attempts > 1 && attempts <= 10, 'lock retries are bounded');
+    else assert.equal(attempts, 1, 'other failures are not retried');
+    assert.deepEqual(await fs.readFile(file), before);
+    assert.deepEqual((await fs.readdir(store.getSessionDirectory(id))).filter(name => name.endsWith('.tmp')), []);
+    const updated = await annotations.update(id, created.annotation.id, { text: 'recovered' }, 1);
+    assert.equal(updated.revision, 2, 'a failed save never advances the committed revision');
+  });
+}
 
 test('trashed recordings cannot be annotated and permanent deletion removes annotations', async t => {
   const directory = await setup(t);

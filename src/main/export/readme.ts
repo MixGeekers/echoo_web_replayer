@@ -43,7 +43,7 @@ Python 3.10+，只使用标准库，无需安装依赖或联网；将 recording.
 
 ## 建议直接发送给 Agent 的任务
 
-> 请分析随附的 TraceDock ZIP。先阅读 AGENT_README.md 和 manifest.json，再按 seq 阅读 timeline.jsonl，并结合 snapshots 中的完整 DOM 和表单状态。还原用户意图和操作步骤，说明每个关键操作之后可观察到的 DOM 变化，给出可靠的自动化定位器、等待条件与失败恢复建议。为结论引用事件 seq/id 和快照路径。区分已观察事实与推断；遇到暂停、跨域 iframe、closed Shadow DOM 等采集空白时明确指出，不能编造未记录的步骤。输出流程说明、定位器建议和可供后续实现的自动化步骤。
+> 请分析随附的 TraceDock ZIP。先阅读 AGENT_README.md 和 manifest.json，再按 seq 阅读 timeline.jsonl，并结合 snapshots 中的完整 DOM 和表单状态。还原用户意图和操作步骤，说明每个关键操作之后可观察到的 DOM 变化，给出可靠的自动化定位器、等待条件与失败恢复建议。为结论引用事件 seq/id 和快照路径。区分已观察事实与推断；遇到暂停、缺少子文档快照、closed Shadow DOM 等采集空白时明确指出，不能编造未记录的步骤。输出流程说明、定位器建议和可供后续实现的自动化步骤。
 
 ## 文件索引与阅读顺序
 
@@ -78,20 +78,22 @@ Python 3.10+，只使用标准库，无需安装依赖或联网；将 recording.
 ### 操作与生命周期
 
 - \`action.click / dblclick / input / change / keydown / submit / focus / scroll\`：用户交互。payload 包含采集器实际可用的目标节点、选择器、属性、文本、值、坐标或按键修饰符；具体以事件中的字段为准。目标选择器只是建议定位信息，不保证跨版本稳定。
+- \`action.frame\`：跨域 iframe 操作。frameId 可与网络和控制台对照；documentId 和 node 一起标识当前文档内的元素。新录制还包含宿主链 framePath、目标定位器、勾选状态、选项序号和控制键。跨域输入值和可打印按键字符不会写入操作事件。
 - \`page.*\`：导航、加载状态和页面生命周期等。一次点击未必导致导航；导航也可能由脚本或重定向触发。
 - \`session.*\`：录制开始、暂停、恢复、结束或中断等控制边界。暂停期间不是连续观测；恢复快照给出恢复时的基线。
 - \`recorder.error\`：采集错误，分析覆盖范围时必须纳入。
 
 ### 网络请求与控制台
 
-- \`network.request / network.response / network.failed\`：页面 XHR、Fetch 与文档导航请求，按 \`payload.requestId\` 关联（重定向沿用同一 ID，每一跳记录一条 3xx 响应）。payload 含 url、method、resourceType、status、statusText、mimeType、startedAt、durationMs、请求头与响应头；请求体 \`postData\` 上限 256 KiB，文本类响应正文 \`body\`（JSON / 文本 / XML / HTML / JS）上限 512 KiB，\`truncated\` 与 \`bytes\` 标明截断与原始大小；二进制、文档正文及超限正文以 \`bodyOmitted\` 说明原因。
+- \`network.request / network.response / network.failed\`：页面 XHR、Fetch 与文档导航请求，按 \`payload.requestId\` 关联（重定向沿用同一 ID，每一跳记录一条 3xx 响应）。payload 含 url、method、resourceType、status、statusText、mimeType、startedAt、durationMs、请求头与响应头；请求体 \`postData\` 上限 256 KiB，文本类响应正文 \`body\`（JSON / 文本 / XML / HTML / JS）上限 512 KiB，\`truncated\` 与 \`bytes\` 标明截断与原始大小；二进制、主文档正文及未读取的超限正文以 \`bodyOmitted\` 说明原因。
 - \`console.message\`：页面主世界的 console 调用，含 level（log / info / warn / error / debug）、method、合并后的文本和来源位置及调用栈；\`console.exception\`：未捕获异常与未处理的 Promise 拒绝，含 kind、消息、来源位置与堆栈。TraceDock 自身隔离环境中的脚本不记录。旧的 \`page.error\` 仍表示页面加载失败。
-- 仅在采集进行中记录，暂停期间不记录；跨域 iframe（独立进程）中的请求和日志不在范围内。请求头不含浏览器另行附加的 Cookie 等底层头。timeline.md 末尾汇总失败请求（HTTP ≥ 400 或网络失败）和页面异常。
+- 仅在采集进行中记录，暂停期间不记录；跨域 iframe 的请求、日志及异常也可记录，来源见 frameId。新录制的独立进程及嵌套 iframe 也包含请求头、请求体、响应头和可读取的文本响应体，包括子文档 HTML。旧记录请以事件中实际存在的字段为准。请求头不含浏览器另行附加的 Cookie 等底层头。timeline.md 末尾汇总失败请求（HTTP ≥ 400 或网络失败）和页面异常。
 
 ### DOM 快照与变化
 
 - \`dom.snapshot.payload.html\` 保存主文档 HTML；若存在 \`tree\` 则包含用于关联变化的节点 ID / 结构；\`forms\` 保存当前表单属性值，不能仅用 HTML attribute 推断输入值。
 - \`frames\`、\`shadowRoots\` 以及 \`coverage\` 描述额外根节点与采集边界。只使用实际存在的数据；不能假定所有 iframe 和所有 Shadow DOM 都可读取。
+- \`frame.snapshot\` 保存跨域子文档的可见节点，\`frame.mutation\` 以同一 documentId 更新节点及其子节点顺序并移除旧节点，\`frame.detach\` 表示文档卸载。每份快照中的 parentDocumentId 和 hostNodeId 标识实际宿主；刷新后的文档拥有新的 documentId。主快照的 frameDocuments 保存可独立回放的子文档基线。visualNodeId 将操作关联到视觉节点。
 - \`dom.mutation.payload.records\` 保存 MutationObserver 批量记录，包括节点 ID、属性/文本旧值与新值、增删子树及相邻节点信息。DOM 修改和操作通过 documentId / 节点 ID / 时间位置建立联系。
 - 一批变化可能包含多个同步 DOM 操作；最后观察到的新值不一定对应每个中间时刻。跨消息接收顺序也不等于严格的浏览器因果顺序。判断因果应结合操作、节点和后续快照，避免仅凭时间相近作结论。
 - \`snapshotCount\` 为快照数；\`mutationCount\` 为 DOM 变化批次数，不等同于单条 MutationRecord 数。
@@ -106,6 +108,6 @@ Python 3.10+，只使用标准库，无需安装依赖或联网；将 recording.
 ${script ? `
 ## 附带的 Playwright 脚本
 
-\`script.spec.ts\` 是 TraceDock 按同一截点从时间线操作事件推断生成的 Playwright Test（TypeScript）草稿，已列入 files.jsonl 校验，restore.py 会把它复制到恢复目录。每个步骤上方的 \`// seq N\` 对应 timeline.jsonl 的事件序号；连续输入合并为一次 fill，滚动和焦点默认省略，暂停、采集错误和无法定位的目标以 TODO 注释标出。它是派生材料而非事实来源：定位器取自录制时的候选项，可能不唯一或随页面版本失效；脚本没有执行验证，请结合 timeline.jsonl 与快照复核后再运行（\`npx playwright test script.spec.ts\`）。脚本保留录制时的原始输入值。
+\`script.spec.ts\` 是 TraceDock 按同一截点从时间线操作事件推断生成的 Playwright Test（TypeScript）草稿，已列入 files.jsonl 校验，restore.py 会把它复制到恢复目录。每个步骤上方的 \`// seq N\` 对应 timeline.jsonl 的事件序号；连续输入合并为一次 fill，滚动和焦点默认省略，暂停、采集错误和无法定位的目标以 TODO 注释标出。它是派生材料而非事实来源：定位器取自录制时的候选项，可能不唯一或随页面版本失效；脚本没有执行验证，请结合 timeline.jsonl 与快照复核后再运行（\`npx playwright test script.spec.ts\`）。主文档及可访问的同源框架保留录制时的原始输入值。跨域操作按实际宿主逐层定位。运行前请为脚本头部列出的 TRACEDOCK_INPUT_* 环境变量提供测试值。
 ` : ""}`;
 }

@@ -1,7 +1,7 @@
 import type { WebContents } from "electron";
 
 type Debugger = WebContents["debugger"];
-type MessageListener = (method: string, params: unknown) => void;
+type MessageListener = (method: string, params: unknown, sessionId?: string) => void;
 type DetachListener = (reason: string) => void;
 interface Entry {
   debug: Debugger;
@@ -31,12 +31,14 @@ export function acquireBrowserDebugger(host: { debugger?: Debugger }) {
   debug.on("detach", onDetached);
   cleanup.push(() => debug.removeListener("detach", onDetached));
   return {
-    sendCommand(method: string, params?: Record<string, unknown>): Promise<unknown> {
+    sendCommand(method: string, params?: Record<string, unknown>, sessionId?: string): Promise<unknown> {
       if (released || current.detached || !debug.isAttached()) return Promise.reject(new Error("浏览器调试连接已断开"));
-      return debug.sendCommand(method, params) as Promise<unknown>;
+      return sessionId ? debug.sendCommand(method, params, sessionId) : debug.sendCommand(method, params);
     },
-    onMessage(listener: MessageListener) {
-      const wrapped = (_event: unknown, method: string, params: unknown) => listener(method, params);
+    onMessage(listener: MessageListener, includeChildSessions = false) {
+      const wrapped = (_event: unknown, method: string, params: unknown, sessionId?: string) => {
+        if (!sessionId || includeChildSessions) listener(method, params, sessionId || undefined);
+      };
       debug.on("message", wrapped);
       cleanup.push(() => debug.removeListener("message", wrapped));
     },

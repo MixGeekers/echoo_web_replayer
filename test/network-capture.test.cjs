@@ -154,6 +154,125 @@ function fakeDebugger() {
   return debug;
 }
 
+function deferred() {
+  let resolve;
+  const promise = new Promise(done => { resolve = done; });
+  return { promise, resolve };
+}
+
+async function captureHarness(t) {
+  const debug = fakeDebugger(), events = [];
+  let recordingId = null;
+  const capture = await new NetworkCapture({ debugger: debug }, {
+    recordingId: () => recordingId,
+    record: (type, payload) => { events.push({ recordingId, type, payload }); },
+  }).init();
+  t.after(() => capture.close());
+  const emit = (method, params) => debug.emit('message', {}, method, params);
+  return {
+    capture, events,
+    start(id) { recordingId = id; capture.start(); },
+    async stop() { await capture.stop(); recordingId = null; },
+    request(id, extra = {}) { emit('Network.requestWillBeSent', requestParams({ requestId: id, ...extra })); },
+    finish(id) {
+      emit('Network.responseReceived', { requestId: id, response: { status: 200, mimeType: 'text/plain', headers: {} } });
+      emit('Network.loadingFinished', { requestId: id, timestamp: 101 });
+    },
+    fail(id) { emit('Network.loadingFailed', { requestId: id, timestamp: 101, errorText: 'net::ERR_ABORTED' }); },
+    log(text) { emit('Runtime.consoleAPICalled', { type: 'log', args: [{ type: 'string', value: text }], timestamp: 1 }); },
+    exception(text) { emit('Runtime.exceptionThrown', { timestamp: 1, exceptionDetails: { text } }); },
+  };
+}
+
+test('late requests, failures and redirects never move from recording A into recording B', async t => {
+  const h = await captureHarness(t);
+  h.start('A');
+  for (const id of ['slow', 'failed', 'redirect']) h.request(id);
+  await h.capture.flush();
+  await h.stop();
+  h.start('B');
+  h.finish('slow');
+  h.fail('failed');
+  h.request('redirect', { redirectResponse: { status: 302, headers: {} } });
+  h.finish('redirect');
+  h.request('fresh');
+  h.finish('fresh');
+  await h.capture.flush();
+  assert.deepEqual(h.events.map(e => [e.recordingId, e.type, e.payload.requestId]), [
+    ['A', 'network.request', 'slow'], ['A', 'network.request', 'failed'], ['A', 'network.request', 'redirect'],
+    ['B', 'network.request', 'fresh'], ['B', 'network.response', 'fresh'],
+  ]);
+});
+
+test('requests started before a pause cannot complete or redirect into the resumed capture interval', async t => {
+  const h = await captureHarness(t);
+  h.start('A');
+  for (const id of ['slow', 'failed', 'redirect']) h.request(id);
+  await h.capture.flush();
+  await h.stop();
+  h.start('A');
+  h.finish('slow');
+  h.fail('failed');
+  h.request('redirect', { redirectResponse: { status: 302, headers: {} } });
+  h.finish('redirect');
+  h.request('fresh');
+  h.finish('fresh');
+  await h.capture.flush();
+  assert.deepEqual(h.events.map(e => [e.type, e.payload.requestId]), [
+    ['network.request', 'slow'], ['network.request', 'failed'], ['network.request', 'redirect'],
+    ['network.request', 'fresh'], ['network.response', 'fresh'],
+  ]);
+});
+
+for (const phase of ['idle', 'paused']) {
+  test(`requests and console events observed while ${phase} are not adopted when capture starts`, async t => {
+    const h = await captureHarness(t);
+    if (phase === 'paused') { h.start('A'); await h.stop(); }
+    for (const id of ['slow', 'failed', 'redirect']) h.request(id);
+    h.log('outside capture');
+    h.exception('outside exception');
+    // Start before queued work can run, and let the old requests finish afterward.
+    h.start('A');
+    h.finish('slow');
+    h.fail('failed');
+    h.request('redirect', { redirectResponse: { status: 302, headers: {} } });
+    h.finish('redirect');
+    h.request('fresh');
+    h.finish('fresh');
+    h.log('inside capture');
+    await h.capture.flush();
+    assert.deepEqual(h.events.map(e => [e.type, e.payload.requestId ?? e.payload.text]), [
+      ['network.request', 'fresh'], ['network.response', 'fresh'], ['console.message', 'inside capture'],
+    ]);
+  });
+}
+
+test('stop waits for persisted events and excludes messages arriving while it drains', async t => {
+  const debug = fakeDebugger(), events = [], writing = deferred(), release = deferred();
+  const capture = await new NetworkCapture({ debugger: debug }, {
+    recordingId: () => 'A',
+    record: async (type, payload) => {
+      writing.resolve();
+      await release.promise;
+      events.push({ type, payload });
+    },
+  }).init();
+  t.after(async () => { release.resolve(); await capture.close(); });
+  capture.start();
+  const log = text => debug.emit('message', {}, 'Runtime.consoleAPICalled', { type: 'log', args: [{ type: 'string', value: text }], timestamp: 1 });
+  log('before stop');
+  let stopped = false;
+  const stopping = capture.stop().then(() => { stopped = true; });
+  await writing.promise;
+  log('during stop');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(stopped, false, 'the boundary must wait for the sink write');
+  release.resolve();
+  await stopping;
+  await capture.flush();
+  assert.deepEqual(events.map(e => e.payload.text), ['before stop']);
+});
+
 test('NetworkCapture records only while recording, correlates by requestId and skips isolated worlds', async t => {
   const debug = fakeDebugger(), events = [];
   let recordingId = null;
@@ -332,4 +451,96 @@ test('stop() stores in-flight responses, then closes the capture window', async 
   emit('Runtime.consoleAPICalled', { type: 'log', args: [{ type: 'string', value: 'after stop' }], timestamp: 1 });
   await capture.flush();
   assert.equal(events.length, 2);
+});
+
+test('iframe sessions isolate duplicate request and execution context IDs', async t => {
+  const debug = fakeDebugger(), events = [];
+  const send = debug.sendCommand;
+  const reads = [];
+  debug.sendCommand = async (method, params, session) => {
+    if (method === 'Network.getResponseBody' || method === 'Network.getRequestPostData') {
+      reads.push([method, params.requestId, session]);
+      return {body: session || 'top', postData: session || 'top'};
+    }
+    return send(method, params, session);
+  };
+  const capture = await new NetworkCapture({ debugger: debug }, {
+    recordingId: () => 'A',
+    record: (type, payload) => events.push({ type, payload }),
+  }).init();
+  t.after(() => capture.close());
+  await capture.start();
+  const emit = (method, params, session) => debug.emit('message', {}, method, params, session);
+  emit('Target.attachedToTarget', { sessionId: 'child', targetInfo: { type: 'iframe' } });
+  for (const session of [undefined, 'child']) {
+    const isDefault = session === 'child';
+    emit('Runtime.executionContextCreated', { context: { id: 1, auxData: { frameId: session || 'top', isDefault } } }, session);
+    emit('Runtime.consoleAPICalled', { executionContextId: 1, type: 'warn', args: [{ type: 'string', value: 'message' }] }, session);
+    emit('Network.requestWillBeSent', requestParams({ frameId: session || 'top',
+      request: {url: 'http://h/upload', method: 'POST', hasPostData: true, headers: {'x-source': session || 'top'}} }), session);
+    emit('Network.responseReceived', { requestId: 'r1', response: { status: 200, mimeType: 'text/plain', headers: {'x-reply': session || 'top'} } }, session);
+  }
+  emit('Network.loadingFinished', { requestId: 'r1', timestamp: 101 }, 'child');
+  emit('Network.loadingFinished', { requestId: 'r1', timestamp: 102 });
+  await capture.flush();
+  const logs = events.filter(e => e.type === 'console.message');
+  assert.deepEqual(logs.map(e => e.payload.frameId), ['child']);
+  const responses = events.filter(e => e.type === 'network.response').map(e => e.payload);
+  assert.deepEqual(responses.map(p => [p.requestId, p.frameId, p.durationMs]), [
+    ['child:r1', 'child', 1000], ['r1', 'top', 2000],
+  ]);
+  const child = events.find(e => e.type === 'network.request' && e.payload.frameId === 'child').payload;
+  assert.equal(child.postData.text, 'child');
+  assert.deepEqual(child.requestHeaders, {'x-source':'child'});
+  assert.deepEqual(responses.map(p => [p.responseHeaders['x-reply'], p.body.text]), [['child','child'], ['top','top']]);
+  assert.deepEqual(reads, [
+    ['Network.getRequestPostData', 'r1', undefined], ['Network.getRequestPostData', 'r1', 'child'],
+    ['Network.getResponseBody', 'r1', 'child'], ['Network.getResponseBody', 'r1', undefined],
+  ]);
+  await capture.stop();
+  emit('Network.requestWillBeSent', requestParams({request: {url:'http://h/idle', hasPostData:true}}), 'child');
+  emit('Network.loadingFinished', {requestId:'r1'}, 'child');
+  await capture.start();
+  emit('Network.requestWillBeSent', requestParams({redirectResponse:{status:302}}), 'child');
+  emit('Network.loadingFinished', {requestId:'r1'}, 'child');
+  await capture.flush();
+  assert.equal(reads.length, 4, 'idle requests and their later redirects never trigger body reads');
+});
+
+test('iframe redirect preserves hop headers and reports a body missing from the completion target', async t => {
+  const debug = fakeDebugger(), events = [], reads = [];
+  const send = debug.sendCommand;
+  debug.sendCommand = async (method, params, sessionId) => {
+    if (method === 'Network.getResponseBody') {
+      reads.push([sessionId, params.requestId]);
+      throw new Error('No resource with given identifier');
+    }
+    return send(method, params, sessionId);
+  };
+  const capture = await new NetworkCapture({debugger:debug}, {
+    recordingId: () => 'rec', record: (type,payload) => events.push({type,payload}),
+  }).init();
+  t.after(() => capture.close());
+  await capture.start();
+  const emit = (method, params, session) => debug.emit('message', {}, method, params, session);
+  emit('Target.attachedToTarget', {sessionId:'outer', targetInfo:{type:'iframe',targetId:'frameA'}});
+  emit('Target.attachedToTarget', {sessionId:'inner', targetInfo:{type:'iframe',targetId:'frameB'}}, 'outer');
+  const nav = {type:'Document', requestId:'loader', loaderId:'loader', frameId:'frameB'};
+  emit('Network.requestWillBeSent', requestParams({...nav}), 'outer');
+  emit('Network.requestWillBeSent', requestParams({...nav,
+    request: {url:'http://h/landed', method:'GET', headers:{'x-hop':'two'}},
+    redirectResponse: {status:303, headers:{location:'http://h/landed'}},
+  }), 'outer');
+  emit('Network.responseReceived', {...nav, response:{status:200, mimeType:'text/html', headers:{'x-final':'yes'}}}, 'inner');
+  emit('Network.loadingFinished', {requestId:'loader', timestamp:101}, 'inner');
+  await capture.flush();
+  const [first, redirected, next, completed] = events.map(e => e.payload);
+  assert.equal(first.postData.text, '{"name":"a"}');
+  assert.equal(redirected.responseHeaders.location, next.url);
+  assert.equal(next.postData, undefined);
+  assert.equal(next.requestId, completed.requestId);
+  assert.deepEqual(completed.requestHeaders, {'x-hop':'two'});
+  assert.deepEqual(completed.responseHeaders, {'x-final':'yes'});
+  assert.match(completed.bodyOmitted, /No resource/);
+  assert.deepEqual(reads, [['inner','loader']]);
 });

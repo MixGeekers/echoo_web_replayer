@@ -464,3 +464,60 @@ test('MCP tracedock_codegen is a strict, scoped, read-only tool with a byte budg
   permissions = new Set();
   assert.equal((await tools.call('c', 'tracedock_codegen', { recordingId: 'r1' })).isError, true);
 });
+
+test('legacy frame actions recover nested hosts at the action timestamp and discard stale or ambiguous targets', async (t) => {
+  const tl = timeline();
+  tl.start();
+  const node = (nodeId, nodeName, id) => ({nodeId, nodeName, attributes: {id}, children: []});
+  const snapshot = (frameId, documentId, parentDocumentId, hostNodeId, nodes) =>
+    ({frameId, documentId, parentDocumentId, hostNodeId, nodes, url: 'https://frame.example/'});
+  const outer = snapshot('outer', 'outer-doc', 'doc-1', 'h1', [node('h2', 'IFRAME', 'nested')]);
+  const initial = snapshot('inner', 'first-doc', 'outer-doc', 'h2', [node('button', 'BUTTON', 'before')]);
+  const action = (doc, visualNodeId = 'button') => tl.add('action.frame', {
+    action: 'click', frameId: 'inner', documentId: doc, element: 'button', visualNodeId, node: 1,
+  });
+  tl.add('dom.snapshot', {inaccessibleFrames: [{target: el('h1', 'iframe', [], {selector: '#outer'})}], frameDocuments: [outer, initial]});
+  action('first-doc');
+  tl.add('frame.mutation', {documentId: 'first-doc', removed: [], nodes: [node('button', 'BUTTON', 'after')]});
+  action('first-doc');
+  tl.add('frame.snapshot', snapshot('inner', 'second-doc', 'outer-doc', 'h2', [
+    node('button', 'BUTTON', 'fresh'), node('other', 'BUTTON', 'fresh'),
+  ]));
+  action('first-doc'); // Same frame, destroyed document.
+  action('second-doc'); // Duplicate ID.
+  tl.add('frame.mutation', {documentId: 'second-doc', removed: ['other'], nodes: []});
+  action('second-doc');
+  tl.add('frame.detach', {documentId: 'outer-doc'});
+  action('second-doc'); // Surviving target ID without a parent chain.
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'tracedock-frames-'));
+  t.after(() => fs.rm(dir, {recursive: true, force: true}));
+  const file = path.join(dir, 'timeline.jsonl');
+  const lines = tl.events.map(e => JSON.stringify(e) + '\n').join('');
+  await fs.writeFile(file, lines);
+  const { code, stats } = await generateFromTimeline({metadata: recording, timelinePath: file, byteLength: Buffer.byteLength(lines)});
+  assert.equal(stats.todos, 3);
+  assert.deepEqual(body(code).slice(1), ['before', 'after', 'fresh'].map(id =>
+    "await page.frameLocator('#outer').frameLocator('#nested').locator('#" + id + "').click();"));
+});
+
+test('frame control keys and implicit clicks stay within their own document', () => {
+  const tl = timeline();
+  tl.start();
+  const hop = selector => ({selector, shadowPath: []});
+  const add = (doc, element, action, extra = {}) => tl.add('action.frame', {
+    documentId: doc, frameId: doc, framePath: [hop('#' + doc)], target: hop(element),
+    node: 1, visualNodeId: 'n1', element, action, ...extra,
+  });
+  add('left', 'body', 'keydown', {controlKey: 'Enter'});
+  add('right', 'button', 'click', {detail: 0});
+  add('right', 'form', 'submit');
+  add('left', 'input', 'input');
+  add('left', 'input', 'change');
+  tl.add('action.frame', {action: 'click', documentId: 'left', frameId: 'left', element: 'button', node: 4});
+  const {code, stats} = generate(tl.events);
+  assert.equal(stats.todos, 1);
+  assert.match(code, /frameLocator\('#left'\)\.locator\('body'\)\.press\('Enter'\)/);
+  assert.match(code, /frameLocator\('#right'\)\.locator\('button'\)\.click\(\)/);
+  assert.match(code, /frameLocator\('#left'\)\.locator\('input'\)\.fill\(frameInput\('TRACEDOCK_INPUT_5'\)\)/);
+  assert.match(code, /TODO: seq 7/);
+});
