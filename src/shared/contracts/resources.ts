@@ -1,4 +1,6 @@
 export interface ResourceEntry {
+  pageId?: string | undefined;
+  activePageId?: string | undefined;
   url: string;
   mimeType?: string | undefined;
   type?: string | undefined;

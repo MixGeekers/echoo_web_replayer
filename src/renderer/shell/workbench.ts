@@ -5,6 +5,7 @@ import { createMCPUI } from "./mcp";
 import { createAnnotationsUI } from "./annotations";
 import { createCodegenUI } from "./codegen";
 import { createFocusMode } from "./focus";
+import { createBrowserPages } from "./browser-pages";
 import { formatDate, count, statusName } from "./format";
 import { element as el, required, message } from "./dom";
 import { svg } from "./icons";
@@ -27,6 +28,8 @@ export function startWorkbench(): void {
     },
     profiles: [],
     activeProfileId: null,
+    activePageId: null,
+    pages: [],
     session: null,
     sessions: [],
     sessionGroups: [],
@@ -118,6 +121,7 @@ export function startWorkbench(): void {
     boundsChanged: scheduleBounds,
     notify,
   });
+  const renderPages = createBrowserPages(api, task => { void run(async () => handleState(await task())); });
 
   function notify(
     title: string,
@@ -395,8 +399,12 @@ export function startWorkbench(): void {
     );
     if (document.activeElement !== el("address-input", "input"))
       el("address-input", "input").value = browser.url || "";
-    el("browser-placeholder", "div").hidden = browser.available || replay.active;
-    el("browser-placeholder", "div").textContent = "浏览环境已关闭 · 从顶部打开或新建 Profile";
+    const popup = state.pages.find(page => page.id === state.activePageId && page.kind === "window");
+    renderPages(state, replay.active, busy || mcp.controlled());
+    el("browser-placeholder", "div").hidden = (browser.available && !popup) || replay.active;
+    el("browser-placeholder", "div").textContent = popup
+      ? "当前页面在独立窗口中，点击上方窗口标签可返回该窗口"
+      : "浏览环境已关闭 · 从顶部打开或新建 Profile";
     el("address-input", "input").disabled = !browser.available || busy;
     el("reload-button", "button").disabled = !browser.available || busy;
     el("home-button", "button").disabled = !browser.available || busy;

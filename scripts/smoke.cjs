@@ -250,7 +250,7 @@ async function run() {
       }, `timeline page after ${displayed} events`);
     }
     assert.equal(displayed, total, 'every persisted event can be reached through the UI');
-    assert.match(await ui.locator('#timeline-list .event-seq').last().innerText(), /^#0001 · session\.start$/);
+    assert.equal(await ui.locator('#timeline-list .event-seq').last().innerText(), '#0001 · 标签页 1 · session.start');
     assert.equal(await ui.locator('#load-more-button').isVisible(), false, 'load-more disappears only at the end');
   });
 

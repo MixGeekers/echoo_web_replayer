@@ -14,13 +14,14 @@ export class ResourceRecorder {
     store: SessionStore,
     host: ResourceHost,
     onChange: () => void = () => {},
+    source?: () => { pageId: string; activePageId: string | undefined },
   ) {
     this.catalogReader = new ResourceCatalog(store);
     this.protocol = new ResourceProtocol(store, this.catalogReader);
     this.capture = new ResourceCapture(store, host, (id) => {
       if (id) this.catalogReader.invalidate(id);
       onChange();
-    });
+    }, source);
   }
   async init(root: string): Promise<this> {
     await this.capture.init(root);

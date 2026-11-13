@@ -97,6 +97,14 @@ input { min-width: 0; }
 .browser-error { display: flex; align-items: center; gap: 7px; flex: none; padding: 8px 12px; background: var(--echo-semantic-danger-background); border-bottom: 1px solid var(--el-color-danger-light-7); color: var(--echo-semantic-danger-text); font-size: var(--echo-system-font-sm); }
 .browser-error > span:last-child { min-width: 0; overflow-wrap: anywhere; }
 .browser-error svg { width: 14px; height: 14px; }
+.browser-pages, .browser-tab-list, .browser-tab { display: flex; align-items: center; min-width: 0; }
+.browser-pages { flex: none; gap: 4px; height: 34px; padding: 0 6px; background: var(--echo-surface-frame); border-bottom: 1px solid var(--line); }
+.browser-tab-list { flex: 0 1 auto; overflow-x: auto; scrollbar-width: thin; gap: 3px; }
+.browser-tab { flex: 0 0 auto; max-width: 156px; height: 26px; padding: 0 3px 0 6px; border: 1px solid transparent; border-radius: var(--echo-radius-xs); }
+.browser-tab.active { background: var(--echo-surface-panel); border-color: var(--echo-border-default); }
+.browser-tab [role=tab] { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--echo-system-font-xs); }
+.browser-tab .icon-button { flex: none; width: 20px; height: 20px; }
+.browser-tab .icon-button svg { width: 11px; }
 .browser-surface { position: relative; flex: 1; min-height: 0; min-width: 0; background: var(--echo-surface-panel); }
 .browser-placeholder { position: absolute; inset: 0; display: grid; place-items: center; color: var(--echo-text-muted); font-size: var(--echo-system-font-sm); }
 

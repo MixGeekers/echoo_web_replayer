@@ -71,11 +71,14 @@ Python 3.10+，只使用标准库，无需安装依赖或联网；将 recording.
 | receivedAt | 主进程持久化此事件时的 UTC ISO 时间 |
 | elapsedMs | 从会话开始到接收时经过的毫秒数，单调不减，包含暂停时间 |
 | url / title | 采集时页面地址和标题 |
+| pageId / activePageId | 事件来源页面 / 当时选中的页面。这两个字段用于区分同一网址的多个标签或窗口，旧记录可能缺少它们 |
 | documentId | 页面文档标识；导航后会更换，节点 ID 仅在相应文档内有效 |
 | payload | 完整采集内容；不同事件类型具有不同结构 |
 | summary | UI / Markdown 索引摘要；可能缩短，不能替代 payload |
 
 ### 操作与生命周期
+
+多页面录制共用一条时间线。可按 pageId 跟踪每个页面，用 page.open 的 openerId 和 page.popup 的 targetPageId 串起父子页面，用 page.select 和 page.close 识别切换和返回。网络请求在同一 pageId 下按 payload.requestId 关联。
 
 - \`action.click / dblclick / input / change / keydown / submit / focus / scroll\`：用户交互。payload 包含采集器实际可用的目标节点、选择器、属性、文本、值、坐标或按键修饰符；具体以事件中的字段为准。目标选择器只是建议定位信息，不保证跨版本稳定。
 - \`action.frame\`：跨域 iframe 操作。frameId 可与网络和控制台对照；documentId 和 node 一起标识当前文档内的元素。新录制还包含宿主链 framePath、目标定位器、勾选状态、选项序号和控制键。跨域输入值和可打印按键字符不会写入操作事件。

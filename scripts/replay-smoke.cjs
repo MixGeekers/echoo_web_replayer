@@ -116,6 +116,11 @@ async function run() {
     desktop.context().on('request', request => { if (/^https?:/.test(request.url())) replayRequests.push(request.url()); });
     await ui.locator('#replay-button').click();
     await ui.waitForFunction(() => !document.querySelector('#replay-play').disabled && document.querySelector('#replay-frame').contentDocument.querySelector('#logo')?.naturalWidth === 60);
+    // The linked CSS and its @import finish independently of the image.
+    await ui.waitForFunction(() => {
+      const doc = document.querySelector('#replay-frame').contentDocument;
+      return doc.defaultView.getComputedStyle(doc.querySelector('#subtitle')).color === 'rgb(37, 99, 235)';
+    }, undefined, { timeout: 10000 });
     const style = await ui.evaluate(async hasFont => {
       const doc = document.querySelector('#replay-frame').contentDocument;
       if (hasFont) await doc.fonts.load('16px ReplayTest');

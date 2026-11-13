@@ -51,6 +51,7 @@ export class ResourceCapture {
     private readonly store: SessionStore,
     private readonly host: ResourceHost,
     private readonly changed: (id?: string) => void,
+    private readonly source?: () => { pageId: string; activePageId: string | undefined },
   ) {}
   async init(root: string): Promise<void> {
     this.cache = await fs.mkdtemp(path.join(root, ".resource-cache-"));
@@ -339,7 +340,7 @@ export class ResourceCapture {
       expectedBytes: _expectedBytes,
       ...record
     } = entry;
-    await this.store.saveResource(id, record, filename);
+    await this.store.saveResource(id, { ...record, ...this.source?.() }, filename);
     this.saved.set(key, signature);
     this.changed(id);
   }

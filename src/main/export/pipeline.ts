@@ -39,7 +39,7 @@ export async function runPreparedExport({
   capture,
   sessionId,
   destination,
-  appVersion = "0.2.0",
+  appVersion = "0.3.0",
   encoding = "delta",
   compression = "deflate",
   range: requestedRange,

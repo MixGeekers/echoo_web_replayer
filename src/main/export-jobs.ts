@@ -26,7 +26,9 @@ interface ExportJob {
 export function createExportJobs(
   win: BrowserWindow,
   store: SessionStore,
-  recording: Pick<RecordingController, "serialize" | "currentSession" | "checkpoint">,
+  recording: Pick<RecordingController, "currentSession" | "checkpoint"> & {
+    serialize<T>(operation: () => T | Promise<T>): Promise<T>;
+  },
   notify: () => void,
   publish: (progress: ExportProgress) => void,
 ) {

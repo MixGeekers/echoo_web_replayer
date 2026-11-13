@@ -38,11 +38,13 @@ export async function resolveRange({
     counts.mutationCount += Number(type === "dom.mutation");
     counts.snapshotCount += Number(type === "dom.snapshot");
   };
-  // Streaming: before the start keep only the latest baseline row and the counts since it.
-  let head: Row | null = null,
+  // Keep a position and prefix counts per page, never the DOM itself. If a requested
+  // slice visits several pages, it needs the preceding baseline of each of them.
+  type Anchor = { row: Row; before: ReturnType<typeof zero> };
+  const baselines = new Map<string, Anchor>(), visited = new Set<string>(), totals = zero();
+  let head: Anchor | undefined,
     tail: Row | null = null,
-    requestedStart: number | null = null,
-    counts = zero();
+    requestedStart: number | null = null;
   for await (const { offset, length, event } of scanTimeline(timelinePath, { byteLength, signal })) {
     checkAbort(signal);
     const row: Row = { seq: event.seq, offset, length, elapsedMs: Number(event.elapsedMs) || 0, type: String(event.type || "") };
@@ -54,33 +56,41 @@ export async function resolveRange({
     const inRange = bySeq
       ? range.startSeq === undefined || row.seq >= range.startSeq
       : range.startMs === undefined || row.elapsedMs >= range.startMs;
-    if (requestedStart === null) {
-      // A snapshot at or before the start becomes the new baseline.
-      if (!head || row.type === "dom.snapshot") {
-        head = row;
-        counts = zero();
-      }
-      if (inRange) requestedStart = row.seq;
+    const key = event.pageId ?? "";
+    let anchor = baselines.get(key);
+    if (!anchor || row.type === "dom.snapshot") {
+      anchor = { row, before: { ...totals } };
+      baselines.set(key, anchor);
     }
-    add(counts, row.type);
-    if (requestedStart !== null) tail = row;
+    if (inRange) {
+      requestedStart ??= row.seq;
+      if (!visited.has(key)) {
+        visited.add(key);
+        if (!head || anchor.row.seq < head.row.seq) head = anchor;
+      }
+      tail = row;
+    }
+    add(totals, row.type);
   }
   if (requestedStart === null || !head || !tail)
     throw new Error("导出范围内没有已保存的事件");
   return {
     requestedStartSeq: requestedStart,
     requestedEndSeq: tail.seq,
-    startSeq: head.seq,
+    startSeq: head.row.seq,
     endSeq: tail.seq,
-    baselineSnapshotSeq: head.type === "dom.snapshot" ? head.seq : null,
-    startByte: head.offset,
+    baselineSnapshotSeq: head.row.type === "dom.snapshot" ? head.row.seq : null,
+    startByte: head.row.offset,
     endByte: tail.offset + tail.length,
-    startElapsedMs: head.elapsedMs,
+    startElapsedMs: head.row.elapsedMs,
     endElapsedMs: tail.elapsedMs,
     sourceEventCount,
     sourceLastSeq,
     sourceTimelineBytes: byteLength,
-    ...counts,
+    eventCount: totals.eventCount - head.before.eventCount,
+    actionCount: totals.actionCount - head.before.actionCount,
+    mutationCount: totals.mutationCount - head.before.mutationCount,
+    snapshotCount: totals.snapshotCount - head.before.snapshotCount,
   };
 }
 

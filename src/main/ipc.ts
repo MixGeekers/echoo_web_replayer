@@ -28,8 +28,7 @@ const number = (value: unknown): number | undefined => {
 interface Options {win: BrowserWindow; workspace: Workspace; demoURL: string; mcp: MCPController; mcpConfig: ()=>MCPConfig;}
 export function installIPC({win,workspace,demoURL,mcp,mcpConfig}: Options) {
   const {store,state,reportError,jobs,command,readable,readRecording,actions} = workspace;
-  const browser = () => workspace.requireRuntime().browser;
-  const recording = () => workspace.requireRuntime().recording;
+  const contents = () => workspace.requireRuntime().contents;
   const navigation = () => workspace.requireRuntime().navigation;
   function shellCaller(event: IpcMainEvent | IpcMainInvokeEvent) {
     if (
@@ -40,9 +39,8 @@ export function installIPC({win,workspace,demoURL,mcp,mcpConfig}: Options) {
       throw new Error("拒绝非应用界面的请求");
   }
   const recorderCaller = (event: IpcMainEvent | IpcMainInvokeEvent) => {
-    const contents = workspace.runtime()?.browser.webContents;
-    return Boolean(contents && !contents.isDestroyed() &&
-      event.sender === contents && event.senderFrame === contents.mainFrame);
+    if (event.sender.isDestroyed() || event.senderFrame !== event.sender.mainFrame) return undefined;
+    return workspace.runtime()?.recorderFor(event.sender);
   };
   function handle<K extends InvokeChannel>(
     name: K,
@@ -54,6 +52,18 @@ export function installIPC({win,workspace,demoURL,mcp,mcpConfig}: Options) {
     });
   }
   handle("getState", state);
+  handle("newPage", input => command(async () => {
+    mcp.assertHumanControl();
+    if (input !== "tab" && input !== "window") throw new Error("无效的页面类型");
+    await workspace.requireRuntime().newPage(input);
+    return state();
+  }));
+  handle("selectPage", input => command(() => {
+    mcp.assertHumanControl(); workspace.requireRuntime().selectPage(string(input)); return state();
+  }));
+  handle("closePage", input => command(() => {
+    mcp.assertHumanControl(); workspace.requireRuntime().closePage(string(input)); return state();
+  }));
   handle("mcpCommand", input => mcp.command(object(input) as unknown as MCPCommand));
   handle("mcpConfig", mcpConfig);
   handle("batchLibrary", input => actions.batchLibrary(parseLibraryBatch(input)));
@@ -140,15 +150,15 @@ export function installIPC({win,workspace,demoURL,mcp,mcpConfig}: Options) {
   handle("home", () => command(() => {mcp.assertHumanControl();return navigation().navigate(demoURL);}));
   handle("back", () => command(() => {
     mcp.assertHumanControl();
-    const h = browser().webContents.navigationHistory;
+    const h = contents().navigationHistory;
     if (h.canGoBack()) h.goBack();
   }));
   handle("forward", () => command(() => {
     mcp.assertHumanControl();
-    const h = browser().webContents.navigationHistory;
+    const h = contents().navigationHistory;
     if (h.canGoForward()) h.goForward();
   }));
-  handle("reload", () => command(() => {mcp.assertHumanControl();browser().webContents.reload();}));
+  handle("reload", () => command(() => {mcp.assertHumanControl();contents().reload();}));
   handle("startSession", input => {
     mcp.assertHumanControl();
     const q=object(input);
@@ -221,13 +231,15 @@ export function installIPC({win,workspace,demoURL,mcp,mcpConfig}: Options) {
     });
   });
   ipcMain.handle("recorder:ready", (event) => {
-    if (!recorderCaller(event)) throw new Error("无效的采集器");
-    return recording().recordingState();
+    const environment = workspace.runtime();
+    if (!environment || !recorderCaller(event)) throw new Error("无效的采集器");
+    return environment.recording.recordingState();
   });
   ipcMain.on("recorder:ack", (event, payload: unknown) => {
-    if (recorderCaller(event)) recording().acknowledge(payload);
+    recorderCaller(event)?.acknowledge(payload);
   });
   ipcMain.on("recorder:event", (event, payload: unknown) => {
-    if (recorderCaller(event)) recording().accept(payload);
+    const page = recorderCaller(event);
+    if (page) workspace.runtime()?.recording.accept(payload, page);
   });
 }

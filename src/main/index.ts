@@ -54,7 +54,7 @@ async function createWindow() {
   const instanceId=randomUUID(),mcpRoot=path.join(workspace.root,"mcp");
   const mcp=await createMCPController(workspace,mcpRoot,instanceId);
   workspace.setMCPHooks(mcp);
-  const agentBrowser=createAgentBrowser({getWebContents:()=>workspace.requireRuntime().browser.webContents});
+  const agentBrowser=createAgentBrowser({getWebContents:()=>workspace.requireRuntime().contents});
   const mcpTools=await createMCPTools({workspace,access:mcp,browser:agentBrowser,dataRoot:mcpRoot});
   mcp.setOperations({...mcpTools.operations,revealForUI:async(id:string)=>{
     const op=mcpTools.operations.getForUI(id),result=op?.result as {path?:string}|undefined;

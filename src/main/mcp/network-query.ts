@@ -32,7 +32,7 @@ const obj = (value: unknown): Record<string, unknown> =>
 export function networkItem(event: EventPreview): Record<string, unknown> {
   const p = obj(event.payload),
     item: Record<string, unknown> = { seq: event.seq };
-  for (const [key, value] of [["id", event.id], ["type", event.type], ["timestamp", event.timestamp], ["summary", event.summary]] as const)
+  for (const [key, value] of [["id", event.id], ["pageId", event.pageId], ["type", event.type], ["timestamp", event.timestamp], ["summary", event.summary]] as const)
     if (value !== undefined) item[key] = value;
   for (const key of ["requestId", "method", "url", "resourceType", "status", "statusText", "mimeType", "durationMs", "errorText", "canceled", "redirectTo", "level", "kind", "text", "line", "column", "bodyOmitted"])
     if (p[key] !== undefined && p[key] !== null) item[key] = p[key];

@@ -1,19 +1,15 @@
 import type { ApplicationPayloadMap } from "../shared/contracts/application";
-import type { WebContentsView } from "electron";
-import { randomUUID } from "node:crypto";
 import type { SessionStore } from "./storage/session-store";
-import type { ResourceRecorder } from "./resources/index";
+import type { RecordingPage } from "./recording-page";
 import type { EventInput } from "../shared/contracts/storage";
 import { errorMessage, object } from "../shared/runtime";
-import type { BrowserState, EventNotice } from "../shared/contracts/ui";
+import { pageLabel, type EventNotice } from "../shared/contracts/ui";
 export type { BrowserState } from "../shared/contracts/ui";
 interface Options {
-  flushFrameDocuments?: () => Promise<void>;
-  frameDocuments?: (documentId: string) => import("../shared/frame-visual").FrameVisual[];
   store: SessionStore;
-  resources: Pick<ResourceRecorder, "start" | "stop">;
-  browser: WebContentsView;
-  browserState: BrowserState;
+  pages: () => RecordingPage[];
+  selected: () => RecordingPage | undefined;
+  drainPages: () => Promise<unknown>;
   appVersion: string;
   profile: () => {id: string; name: string};
   notify: () => void;
@@ -24,11 +20,9 @@ interface Options {
 }
 export function createRecordingController({
   store,
-  frameDocuments,
-  flushFrameDocuments,
-  resources,
-  browser,
-  browserState,
+  pages,
+  selected,
+  drainPages,
   appVersion,
   profile,
   notify,
@@ -36,18 +30,8 @@ export function createRecordingController({
   reportError,
   publish,
 }: Options) {
-  const wc = browser.webContents;
   let activeId: string | null = null;
-  let commandQueue: Promise<unknown> = Promise.resolve();
-  const pendingCommands = new Map<
-    string,
-    { resolve: () => void; reject: (error: Error) => void }
-  >();
-  wc.once("destroyed", () => {
-    for (const pending of pendingCommands.values())
-      pending.reject(new Error("浏览页面已关闭，采集命令未完成"));
-    pendingCommands.clear();
-  });
+  let capturing = false;
   function requireActiveId(): string {
     if (!activeId) throw new Error("当前没有录制会话");
     return activeId;
@@ -56,25 +40,22 @@ export function createRecordingController({
     return activeId && store.sessions.has(activeId) ? store.getSession(activeId) : null;
   }
   function recordingState() {
-    const s = currentSession();
-    return { recording: s?.status === "recording", sessionId: s?.id || null };
-  }
-  function serialize<T>(fn: () => T | Promise<T>): Promise<T> {
-    const operation = commandQueue.then(fn);
-    commandQueue = operation.catch(() => {});
-    return operation;
+    return { recording: capturing, sessionId: activeId };
   }
   async function persist(
     type: string,
     payload: unknown = {},
     extra: Omit<EventInput, "type" | "payload"> = {},
+    page = selected(),
   ) {
     if (!activeId) return;
     const event = await store.append(activeId, {
       type,
       timestamp: new Date().toISOString(),
-      url: browserState.url,
-      title: browserState.title,
+      url: page?.state.url,
+      title: page?.state.title,
+      pageId: page?.id,
+      activePageId: selected()?.id,
       payload,
       ...extra,
     });
@@ -108,54 +89,48 @@ export function createRecordingController({
     type: K,
     payload: ApplicationPayloadMap[K],
     extra: Omit<EventInput, "type" | "payload"> = {},
+    page = selected(),
   ) {
-    return persist(type, payload, extra);
+    return persist(type, payload, extra, page);
   }
   function sendRecorderState() {
-    if (!wc.isDestroyed()) wc.send("recorder:state", recordingState());
-  }
-  async function recorderCommand(command: string, reason: string) {
-    if (wc.isDestroyed())
-      throw new Error("浏览器尚未就绪");
-    const requestId = randomUUID();
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        pendingCommands.delete(requestId);
-        reject(new Error("页面采集器未响应；页面可能正在跳转或已崩溃"));
-      }, 4500);
-      pendingCommands.set(requestId, {
-        resolve: () => {
-          clearTimeout(timeout);
-          resolve();
-        },
-        reject: (error) => {
-          clearTimeout(timeout);
-          reject(error);
-        },
-      });
-      wc.send("recorder:command", {
-        command,
-        reason,
-        requestId,
-      });
-    });
-    await store.flush();
-  }
-  async function checkpoint(command: string, reason: string) {
-    try {
-      await flushFrameDocuments?.();
-      await recorderCommand(command, reason);
-      return true;
-    } catch (error) {
-      await append("recorder.error", {
-        message: errorMessage(error),
-        command,
-        reason,
-        possibleGap: true,
-      });
-      reportError(error);
-      return false;
+    for (const page of pages()) {
+      if (!page.contents.isDestroyed()) page.contents.send("recorder:state", recordingState());
     }
+  }
+  async function checkpoint(command: string, reason: string, targets = pages()) {
+    const results = await Promise.all(targets.map(async page => {
+      try {
+        await page.command(command, reason);
+        return true;
+      } catch (error) {
+        const message = `${pageLabel(page.id)} · ${errorMessage(error)}`;
+        await append("recorder.error", { message, command, reason, possibleGap: true }, {}, page);
+        if (!page.contents.isDestroyed()) reportError(new Error(message));
+        return false;
+      }
+    }));
+    await store.flush();
+    return results.length > 0 && results.every(Boolean);
+  }
+  async function startPages() {
+    const id = requireActiveId();
+    capturing = true;
+    await Promise.all(pages().map(async page => {
+      try { await page.start(id); }
+      catch (error) {
+        const message = `${pageLabel(page.id)}的资源采集启动失败，${errorMessage(error)}`;
+        await append("recorder.error", { message, possibleGap: true }, {}, page);
+        reportError(new Error(message));
+      }
+    }));
+    sendRecorderState();
+  }
+  async function stopPages() {
+    capturing = false;
+    sendRecorderState();
+    await Promise.all(pages().map(page => page.stop()));
+    await drainPages();
   }
   async function startSession(input: {name: string; sessionGroupId: string}) {
     const current = currentSession();
@@ -164,15 +139,16 @@ export function createRecordingController({
     if (typeof input.name !== "string" || !input.name.trim() || input.name.trim().length > 160)
       throw new Error("采集名称须为 1–160 个字符");
     const label = input.name.trim();
-    const session = await store.create(label, browserState.url, profile(), input.sessionGroupId);
+    const page = selected();
+    if (!page || page.contents.isDestroyed()) throw new Error("请先打开网页");
+    const session = await store.create(label, page.state.url, profile(), input.sessionGroupId);
     activeId = session.id;
     await append("session.start", {
       name: label,
       appVersion: appVersion,
       redaction: false,
     });
-    await resources.start(activeId);
-    sendRecorderState();
+    await startPages();
     await checkpoint("flush", "start");
     notify();
     return store.getSession(requireActiveId());
@@ -181,10 +157,9 @@ export function createRecordingController({
     if (currentSession()?.status !== "recording")
       throw new Error("当前没有正在录制的会话");
     await checkpoint("stop", "pause");
-    await resources.stop();
+    await stopPages();
     await append("session.pause", { reason: "user" });
     await store.update(requireActiveId(), { status: "paused" });
-    sendRecorderState();
     notify();
     return store.getSession(requireActiveId());
   }
@@ -196,8 +171,7 @@ export function createRecordingController({
       reason: "user",
       note: "暂停期间未采集；恢复时建立新的 DOM 基线。",
     });
-    await resources.start(activeId);
-    sendRecorderState();
+    await startPages();
     await checkpoint("flush", "resume");
     notify();
     return store.getSession(requireActiveId());
@@ -207,7 +181,7 @@ export function createRecordingController({
     if (!session || !["recording", "paused"].includes(session.status))
       return session;
     if (session.status === "recording") {
-      if (wc.isDestroyed()) {
+      if (!pages().length) {
         await append("recorder.error", {
           message: "浏览页面已关闭，无法获取结束快照；此前收到的事件已保留。",
           reason,
@@ -218,13 +192,12 @@ export function createRecordingController({
         await checkpoint("stop", "stop");
       }
     }
-    await resources.stop();
+    await stopPages();
     await append("session.stop", { reason });
     await store.update(requireActiveId(), {
       status: "stopped",
       endedAt: new Date().toISOString(),
     });
-    sendRecorderState();
     await store.flush();
     notify();
     return store.getSession(requireActiveId());
@@ -232,32 +205,17 @@ export function createRecordingController({
   async function snapshot() {
     if (currentSession()?.status !== "recording")
       throw new Error("请在录制中抓取快照");
-    if (!(await checkpoint("snapshot", "manual")))
+    const page = selected();
+    if (!page || !(await checkpoint("snapshot", "manual", [page])))
       throw new Error("快照未完成，详情已记录在时间线");
     return store.getSession(requireActiveId());
   }
 
-  function acknowledge(value: unknown) {
-    const payload = object(value);
-    if (typeof payload.requestId !== "string") return;
-    const pending = pendingCommands.get(payload.requestId);
-    if (!pending) return;
-    pendingCommands.delete(payload.requestId);
-    if (payload.ok === false)
-      pending.reject(
-        new Error(
-          typeof payload.error === "string"
-            ? payload.error
-            : "页面采集命令失败",
-        ),
-      );
-    else pending.resolve();
-  }
-  function accept(value: unknown) {
+  function accept(value: unknown, page: RecordingPage) {
     const envelope = object(value);
     if (
       envelope.sessionId !== activeId ||
-      currentSession()?.status !== "recording"
+      !capturing
     )
       return;
     if (
@@ -269,8 +227,8 @@ export function createRecordingController({
     for (const key of ["timestamp", "documentId", "url", "title"] as const)
       if (typeof envelope[key] === "string") extra[key] = envelope[key];
     let payload = envelope.payload;
-    if (envelope.type === "dom.snapshot" && frameDocuments && typeof envelope.documentId === "string") {
-      const frames = frameDocuments(envelope.documentId);
+    if (envelope.type === "dom.snapshot" && typeof envelope.documentId === "string") {
+      const frames = page.network.archive.snapshots(envelope.documentId);
       if (frames.length) {
         const snapshot = object(payload);
         payload = {
@@ -279,12 +237,11 @@ export function createRecordingController({
         };
       }
     }
-    persist(envelope.type, payload, extra).catch(reportError);
+    persist(envelope.type, payload, extra, page).catch(reportError);
   }
   return {
     currentSession,
     recordingState,
-    serialize,
     append,
     checkpoint,
     startSession,
@@ -292,7 +249,6 @@ export function createRecordingController({
     resumeSession,
     stopSession,
     snapshot,
-    acknowledge,
     accept,
   };
 }

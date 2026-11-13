@@ -148,7 +148,7 @@ export async function createMCPTools({workspace:ws,access,browser,dataRoot}:{wor
         if(nameShort==="navigate") {
           const runtime=ws.requireRuntime(),navAction=q.action??"url";
           if(navAction==="url")result=await runtime.navigation.navigate(text(q,"url"));
-          else {const h=runtime.browser.webContents.navigationHistory;if(navAction==="back"&&h.canGoBack())h.goBack();else if(navAction==="forward"&&h.canGoForward())h.goForward();else if(navAction==="reload")runtime.browser.webContents.reload();else throw new MCPToolError("NOT_AVAILABLE","没有可用的导航历史");result={url:runtime.browser.webContents.getURL()};}
+          else {const h=runtime.contents.navigationHistory;if(navAction==="back"&&h.canGoBack())h.goBack();else if(navAction==="forward"&&h.canGoForward())h.goForward();else if(navAction==="reload")runtime.contents.reload();else throw new MCPToolError("NOT_AVAILABLE","没有可用的导航历史");result={url:runtime.contents.getURL()};}
         } else result=await browser.call(nameShort,q,guard);
         const after=ws.state().session;
         return {...(result as Record<string,unknown>),...(write?{actionId:`action-${randomUUID()}`,recordingId:record?.id??null,seqRange:record&&after?.id===record.id&&after.lastSeq>beforeSeq?[beforeSeq+1,after.lastSeq]:null,evidencePending:record?.status==="recording"&&after?.id===record.id&&after.lastSeq<=beforeSeq}:{}),contextRevision:access.contextRevision()};

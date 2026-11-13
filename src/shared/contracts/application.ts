@@ -44,7 +44,10 @@ export interface ApplicationPayloadMap extends NetworkPayloadMap {
     httpResponseCode?: number;
   };
   "page.error": { errorCode: number; errorDescription: string; url: string };
-  "page.popup": { url: string; disposition: string };
+  "page.popup": { url: string; disposition: string; targetPageId?: string };
+  "page.open": { url: string; kind: "tab" | "window"; openerId: string | null };
+  "page.select": { previousPageId: string | null };
+  "page.close": { url: string };
   "recorder.error": {
     message: string;
     possibleGap?: boolean;

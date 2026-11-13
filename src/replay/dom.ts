@@ -63,6 +63,7 @@ export class ReplayDOM {
   private templateHosts = new WeakMap<Node, HTMLTemplateElement>();
   private ready: Promise<void>;
   private sessionId = "";
+  private pageId: string | undefined;
   private at = 0;
   private endSeq = 0;
   private documentId: string | null = null;
@@ -93,6 +94,7 @@ export class ReplayDOM {
     this.at = at;
     this.endSeq = endSeq;
     this.documentId = null;
+    this.pageId = undefined;
     this.gaps = 0;
     this.frames.clear();
     this.mounted.clear();
@@ -113,6 +115,7 @@ export class ReplayDOM {
       this.sessionId,
       this.at,
       this.endSeq,
+      this.pageId,
     );
   }
   private css(value: string, base: string): string {
@@ -122,6 +125,7 @@ export class ReplayDOM {
       this.sessionId,
       this.at,
       this.endSeq,
+      this.pageId,
     );
   }
   private binding(node: Node, name: string, value: string): void {
@@ -341,6 +345,7 @@ export class ReplayDOM {
     this.scrolls.clear();
     this.onPointer(null);
     this.documentId = event.documentId;
+    this.pageId = event.pageId;
     this.at = at;
     const payload = event.payload;
     this.url = payload.url || event.url;

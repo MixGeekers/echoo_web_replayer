@@ -47,6 +47,8 @@ const META_LIMITS: Readonly<Record<string, number>> = Object.freeze({
   timestamp: 64,
   receivedAt: 64,
   documentId: 512,
+  pageId: 64,
+  activePageId: 64,
   url: 2048,
   title: 512,
   summary: 280,

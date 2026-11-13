@@ -72,7 +72,7 @@ export class ResourceCatalog {
     const entries = (await this.read(id)).filter(
         (entry) => entry.seq <= endSeq,
       ),
-      latest = new Map(entries.map((entry) => [entry.url, entry]));
+      latest = new Map(entries.map((entry) => [JSON.stringify([entry.pageId, entry.url]), entry]));
     const missing = new Set(
       [...latest.values()]
         .filter((entry) => entry.status !== "saved")
@@ -112,6 +112,7 @@ function readRecord(value: unknown): ResourceRecord {
     status: data.status,
   };
   for (const key of [
+    "pageId",
     "mimeType",
     "type",
     "capturedAt",

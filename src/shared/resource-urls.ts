@@ -4,6 +4,7 @@ export function resourceURL(
   sessionId: string,
   at: number,
   endSeq = at,
+  pageId?: string,
 ) {
   const text = String(value || "").trim();
   if (!text || text.startsWith("#")) return text;
@@ -19,7 +20,8 @@ export function resourceURL(
       return "";
     const hash = url.hash;
     url.hash = "";
-    return `tracedock-resource://asset/${encodeURIComponent(sessionId)}?url=${encodeURIComponent(url.href)}&at=${Number(at) || 0}&end=${Number(endSeq) || 0}${hash}`;
+    const page = pageId ? `&page=${encodeURIComponent(pageId)}` : "";
+    return `tracedock-resource://asset/${encodeURIComponent(sessionId)}?url=${encodeURIComponent(url.href)}&at=${Number(at) || 0}&end=${Number(endSeq) || 0}${page}${hash}`;
   } catch {
     return "";
   }
@@ -30,6 +32,7 @@ export function cssText(
   sessionId: string,
   at: number,
   endSeq = at,
+  pageId?: string,
 ) {
   const unescape = (value: string) =>
     value.replace(
@@ -53,9 +56,9 @@ export function cssText(
       bare: string | undefined,
     ) => {
       if (imported !== undefined)
-        return `@import ${quote(resourceURL(unescape(imported.slice(1, -1)), base, sessionId, at, endSeq))}`;
+        return `@import ${quote(resourceURL(unescape(imported.slice(1, -1)), base, sessionId, at, endSeq, pageId))}`;
       if (/^url\(/i.test(match))
-        return `url(${quote(resourceURL(unescape(double ?? single ?? (bare ?? "").trim()), base, sessionId, at, endSeq))})`;
+        return `url(${quote(resourceURL(unescape(double ?? single ?? (bare ?? "").trim()), base, sessionId, at, endSeq, pageId))})`;
       return match;
     },
   );

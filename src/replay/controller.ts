@@ -36,6 +36,7 @@ export class ReplayController {
   private sessionId = "";
   private endSeq: number | undefined;
   private cursor = 0;
+  private pageId: string | undefined;
   private buffer: StoredEvent[] = [];
   private hasMore = false;
   private lastTick = 0;
@@ -96,6 +97,7 @@ export class ReplayController {
       this.duration = data.durationMs;
       this.position = data.timeMs;
       this.cursor = data.afterSeq;
+      this.pageId = data.pageId;
       this.buffer = [];
       this.hasMore = false;
       await this.target.reset(this.sessionId, data.targetSeq, data.endSeq);
@@ -148,6 +150,15 @@ export class ReplayController {
     }
   }
   private apply(event: StoredEvent, seeking: boolean): void {
+    if (!seeking && event.type === "page.select" && event.pageId) {
+      this.pageId = event.pageId;
+      this.target.apply({ type: "page.navigation", seq: event.seq, documentId: null, url: event.url,
+        payload: { sameDocument: false, url: event.url } }, false);
+    }
+    if (this.pageId && event.pageId && event.pageId !== this.pageId && !event.type.startsWith("session.")) {
+      this.observer.event(event.seq, event.type);
+      return;
+    }
     const decoded = decodeReplayEvent(event);
     if (decoded) this.target.apply(decoded, seeking);
     this.observer.event(event.seq, event.type);

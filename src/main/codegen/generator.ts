@@ -23,6 +23,7 @@ export interface CodegenEvent {
   timestamp?: unknown;
   elapsedMs?: unknown;
   documentId?: unknown;
+  pageId?: unknown;
   payload?: unknown;
 }
 
@@ -265,7 +266,18 @@ export function describeTarget(rawTarget: unknown, documentId: string): CodegenT
   };
 }
 
-type StepBase = { seqs: number[]; at: number };
+type StepBase = { seqs: number[]; at: number; page?: string };
+interface ScriptPage {
+  variable: string;
+  history: FrameHistory;
+  currentUrl: string;
+  actionSinceNavigation: boolean;
+  lastNavigation: { at: number; asserted: boolean } | null;
+}
+interface PageBinding { url: string; manual: boolean }
+function scriptPage(variable: string, currentUrl: string): ScriptPage {
+  return { variable, currentUrl, history: new FrameHistory(), actionSinceNavigation: variable !== "page", lastNavigation: null };
+}
 export type Step = StepBase &
   (
     | { op: "goto"; url: string; note?: string }
@@ -300,7 +312,9 @@ function sameTarget(step: Step | undefined, target: CodegenTarget): step is Targ
 const hasTarget = (step: Step): step is TargetStep => "target" in step && !!step.target;
 
 export class ScriptBuilder {
-  private history = new FrameHistory();
+  private page = scriptPage("page", "");
+  private readonly pages = new Map<string, ScriptPage>();
+  private readonly bindings = new Map<string, PageBinding>();
   needsFrameHistory = false;
   private readonly steps: Step[] = [];
   private readonly fills = new Map<string, Extract<Step, { op: "fill" }>>();
@@ -313,11 +327,8 @@ export class ScriptBuilder {
   private firstSeq: number | null = null;
   private lastSeq: number | null = null;
   private startUrl = "";
-  private currentUrl = "";
   private started = false;
   private paused = false;
-  private actionSinceNavigation = false;
-  private lastNavigation: { at: number; asserted: boolean } | null = null;
   private truncated = 0;
   private passwords = false;
   constructor(private readonly recording: CodegenRecording, options: CodegenOptions = {}) {
@@ -334,23 +345,24 @@ export class ScriptBuilder {
       this.truncated++;
       return;
     }
+    step.page = this.page.variable;
     this.steps.push(step);
-    if (ACTION_OPS.has(step.op)) this.actionSinceNavigation = true;
+    if (ACTION_OPS.has(step.op)) this.page.actionSinceNavigation = true;
   }
   private last(): Step | undefined {
-    return this.steps.at(-1);
+    const last = this.steps.at(-1);
+    return (last?.page ?? "page") === this.page.variable ? last : undefined;
   }
   private ensureStart(url: string, seq: number, at: number) {
     if (this.started) return;
     this.started = true;
     this.startUrl = url || this.recording.url || "about:blank";
-    this.currentUrl = this.startUrl;
+    this.page.currentUrl = this.startUrl;
     this.steps.push({ op: "goto", url: this.startUrl, seqs: seq ? [seq] : [], at });
   }
   /** Feed one timeline event in seq order. */
   add(event: CodegenEvent): void {
     this.events++;
-    this.history.update(event);
     const type = str(event.type);
     const seq = num(event.seq) ?? 0;
     if (seq) {
@@ -359,6 +371,19 @@ export class ScriptBuilder {
     }
     const payload = obj(event.payload);
     const url = str(event.url);
+    const pageId = str(event.pageId);
+    if (pageId) {
+      let page = this.pages.get(pageId);
+      if (!page) {
+        page = this.pages.size ? scriptPage(`page${this.pages.size + 1}`, url) : this.page;
+        this.pages.set(pageId, page);
+        if (page.variable !== "page") this.bindings.set(page.variable, { url, manual: type === "page.open" && !payload.openerId });
+      }
+      this.page = page;
+      const binding = this.bindings.get(page.variable);
+      if (binding && type === "page.navigation" && (!binding.url || binding.url === "about:blank")) binding.url = str(payload.url);
+    }
+    this.page.history.update(event);
     const at = num(event.elapsedMs) ?? 0;
     const stamp = Date.parse(str(event.timestamp));
     const time = Number.isFinite(stamp) ? stamp : at;
@@ -378,11 +403,11 @@ export class ScriptBuilder {
       case "session.resume": {
         this.paused = false;
         const resumeUrl = url;
-        if (resumeUrl && resumeUrl !== this.currentUrl && /^(https?|file):/i.test(resumeUrl)) {
-          this.push({ op: "comment", text: `暂停期间页面从 ${commentText(this.currentUrl, 120)} 变为 ${commentText(resumeUrl, 120)}，以下直接打开恢复时的页面；请补充暂停期间的操作。`, todo: true, seqs: [], at });
+        if (resumeUrl && resumeUrl !== this.page.currentUrl && /^(https?|file):/i.test(resumeUrl)) {
+          this.push({ op: "comment", text: `暂停期间页面从 ${commentText(this.page.currentUrl, 120)} 变为 ${commentText(resumeUrl, 120)}，以下直接打开恢复时的页面；请补充暂停期间的操作。`, todo: true, seqs: [], at });
           this.push({ op: "goto", url: resumeUrl, seqs: [seq], at, note: "恢复采集" });
-          this.currentUrl = resumeUrl;
-          this.actionSinceNavigation = false;
+          this.page.currentUrl = resumeUrl;
+          this.page.actionSinceNavigation = false;
         } else this.push({ op: "comment", text: `seq ${seq} 恢复采集`, todo: false, seqs: [], at });
         return;
       }
@@ -399,7 +424,7 @@ export class ScriptBuilder {
         this.push({ op: "comment", text: `seq ${seq} 页面加载失败 ${commentText(str(payload.url), 120)}：${commentText(str(payload.errorDescription), 80)}`, todo: true, seqs: [], at });
         return;
       case "page.popup":
-        this.push({ op: "comment", text: `seq ${seq} 网页请求打开新窗口（${commentText(str(payload.url), 120)}）；TraceDock 在当前页加载，真实浏览器中可能需要 page.waitForEvent('popup')。`, todo: true, seqs: [], at });
+        this.push({ op: "comment", text: `seq ${seq} 网页请求打开新窗口（${commentText(str(payload.url), 120)}），请检查触发步骤和弹窗等待时机。`, todo: true, seqs: [], at });
         return;
       case "page.navigation":
         this.navigation(payload, seq, at);
@@ -407,7 +432,7 @@ export class ScriptBuilder {
       case "action.frame":
         if ((!payload.framePath || !payload.target) && payload.visualNodeId) {
           this.needsFrameHistory = true;
-          this.frameAction(this.history.resolve(payload, cssEscape) ?? payload, seq, at, time);
+          this.frameAction(this.page.history.resolve(payload, cssEscape) ?? payload, seq, at, time);
         } else this.frameAction(payload, seq, at, time);
         return;
       case "action.focus":
@@ -510,12 +535,12 @@ export class ScriptBuilder {
     const url = str(payload.url);
     if (!url || url === "about:blank") return;
     const sameDocument = payload.sameDocument === true;
-    if (url === this.currentUrl && sameDocument) return;
+    if (url === this.page.currentUrl && sameDocument) return;
     const redirect =
-      !this.actionSinceNavigation &&
-      !!this.lastNavigation?.asserted &&
-      at - this.lastNavigation.at <= REDIRECT_WINDOW_MS;
-    const caused = this.actionSinceNavigation || redirect;
+      !this.page.actionSinceNavigation &&
+      !!this.page.lastNavigation?.asserted &&
+      at - this.page.lastNavigation.at <= REDIRECT_WINDOW_MS;
+    const caused = this.page.actionSinceNavigation || redirect;
     this.navigations++;
     if (caused) {
       const last = this.last();
@@ -525,14 +550,14 @@ export class ScriptBuilder {
       } else this.push({ op: "expectUrl", url, seqs: [seq], at });
     } else if (sameDocument) {
       this.push({ op: "comment", text: `seq ${seq} 页面脚本将地址改为 ${commentText(url, 160)}`, todo: false, seqs: [], at });
-    } else if (url === this.currentUrl) {
+    } else if (url === this.page.currentUrl) {
       const first = this.steps[0];
       if (this.steps.length === 1 && first?.op === "goto") first.seqs.push(seq);
       else this.push({ op: "reload", seqs: [seq], at });
     } else this.push({ op: "goto", url, seqs: [seq], at });
-    this.currentUrl = url;
-    this.actionSinceNavigation = false;
-    this.lastNavigation = { at, asserted: caused };
+    this.page.currentUrl = url;
+    this.page.actionSinceNavigation = false;
+    this.page.lastNavigation = { at, asserted: caused };
   }
   private scroll(event: CodegenEvent, payload: Rec, seq: number, at: number) {
     if (!this.options.includeScroll) {
@@ -625,7 +650,7 @@ export class ScriptBuilder {
       }
       let step: TargetStep;
       if (last?.op === "click" && sameTarget(last, target) && !last.modifiers.length && !last.button) {
-        step = { op, target, seqs: [...last.seqs, seq], at: last.at };
+        step = { op, target, seqs: [...last.seqs, seq], at: last.at, page: this.page.variable };
         this.steps[this.steps.length - 1] = step;
       } else {
         step = { op, target, seqs: [seq], at: time };
@@ -685,7 +710,7 @@ export class ScriptBuilder {
     let step: Extract<Step, { op: "fill" }>;
     // Playwright's fill focuses the field itself; a plain click into it is redundant.
     if (last?.op === "click" && sameTarget(last, target) && !last.modifiers.length && !last.button && last.detail <= 1) {
-      step = { op: "fill", target, value, seqs: [...last.seqs, seq], at: last.at };
+      step = { op: "fill", target, value, seqs: [...last.seqs, seq], at: last.at, page: this.page.variable };
       this.steps[this.steps.length - 1] = step;
     } else {
       step = { op: "fill", target, value, seqs: [seq], at: time };
@@ -752,12 +777,13 @@ export class ScriptBuilder {
     }
     this.push({ op: "submit", target, seqs: [seq], at: time });
   }
-  finish(): Omit<CodegenStats, "steps" | "todos"> & { steps: Step[]; warnings: string[]; startUrl: string; truncated: number; passwords: boolean } {
+  finish(): Omit<CodegenStats, "steps" | "todos"> & { steps: Step[]; bindings: ReadonlyMap<string, PageBinding>; warnings: string[]; startUrl: string; truncated: number; passwords: boolean } {
     if (!this.started) this.ensureStart(this.recording.url || "", 0, 0);
     if (this.paused) this.warnings.add("记录在暂停状态结束，暂停之后的操作没有采集。");
     if (this.truncated) this.warnings.add(`步骤超过 ${this.options.maxSteps} 条，其后的 ${this.truncated} 条已省略。`);
     return {
       steps: this.steps,
+      bindings: this.bindings,
       warnings: [...this.warnings],
       startUrl: this.startUrl,
       truncated: this.truncated,
@@ -814,9 +840,9 @@ const PY: Dialect = {
   method: (n) => PY_METHODS[n] ?? n,
 };
 
-function renderLocator(d: Dialect, target: CodegenTarget): string | null {
+function renderLocator(d: Dialect, target: CodegenTarget, page: string): string | null {
   if (!target.frames || !target.locator) return null;
-  let expr = "page";
+  let expr = page;
   for (const hop of target.frames) {
     for (const host of hop.shadowHosts) expr += `.locator(${d.quote(host)})`;
     expr += `.${d.method("frameLocator")}(${d.quote(hop.selector)})`;
@@ -857,9 +883,10 @@ function why(target: CodegenTarget): string {
 }
 
 /** Render steps into statement lines (without indentation) and count TODOs. */
-function renderSteps(d: Dialect, steps: Step[]): { lines: string[]; todos: number } {
+function renderSteps(d: Dialect, steps: Step[], bindings: ReadonlyMap<string, PageBinding>): { lines: string[]; todos: number } {
   const lines: string[] = [];
   let todos = 0;
+  const declared = new Set<string>(["page"]);
   const c = d.comment;
   const todo = (text: string) => {
     todos++;
@@ -873,12 +900,30 @@ function renderSteps(d: Dialect, steps: Step[]): { lines: string[]; todos: numbe
     }
     const label = seqLabel(step.seqs);
     if (label) lines.push(`${c} seq ${label}${step.op === "goto" && step.note ? ` · ${step.note}` : ""}`);
+    const page = step.page ?? "page";
+    const binding = bindings.get(page);
+    if (binding && !declared.has(page)) {
+      if (binding.manual) {
+        lines.push(d.python ? `${page} = page.context.new_page()` : `const ${page} = await page.context().newPage();`);
+        if (binding.url && binding.url !== "about:blank") lines.push(`${d.await}${page}.goto(${d.quote(binding.url)})${d.end}`);
+      } else {
+        todo(`按录制网址定位 ${page}，请确认窗口已就绪且网址唯一。`);
+        const previous = [...declared].join(", ");
+        if (d.python) lines.push(`${page}, = [p for p in page.context.pages if p not in [${previous}] and p.url == ${d.quote(binding.url)}]`);
+        else {
+          lines.push(`const ${page}Matches = page.context().pages().filter(p => ![${previous}].includes(p) && p.url() === ${d.quote(binding.url)});`,
+            `if (${page}Matches.length !== 1) throw new Error('请确认 ${page} 已打开且网址唯一');`,
+            `const ${page} = ${page}Matches[0]!;`);
+        }
+      }
+      declared.add(page);
+    }
     if (hasTarget(step)) {
-      const locator = renderLocator(d, step.target);
+      const locator = renderLocator(d, step.target, page);
       if (!locator) {
         if (step.op === "click" && step.target.frames?.length === 0 && step.x !== null && step.y !== null) {
           todo(`${why(step.target)}，按录制时的视口坐标点击；请改为稳定的定位器。`);
-          lines.push(`${d.await}page.mouse.click(${Math.round(step.x)}, ${Math.round(step.y)})${d.end}`);
+          lines.push(`${d.await}${page}.mouse.click(${Math.round(step.x)}, ${Math.round(step.y)})${d.end}`);
         } else todo(`${why(step.target)}，已跳过 ${step.op} 步骤。`);
         continue;
       }
@@ -940,22 +985,22 @@ function renderSteps(d: Dialect, steps: Step[]): { lines: string[]; todos: numbe
     }
     switch (step.op) {
       case "goto":
-        lines.push(`${d.await}page.goto(${d.quote(step.url)})${d.end}`);
+        lines.push(`${d.await}${page}.goto(${d.quote(step.url)})${d.end}`);
         break;
       case "reload":
-        lines.push(`${d.await}page.reload()${d.end}`);
+        lines.push(`${d.await}${page}.reload()${d.end}`);
         break;
       case "expectUrl":
-        lines.push(`${d.await}expect(page).${d.method("toHaveURL")}(${d.quote(step.url)})${d.end}`);
+        lines.push(`${d.await}expect(${page}).${d.method("toHaveURL")}(${d.quote(step.url)})${d.end}`);
         break;
       case "press":
-        lines.push(`${d.await}page.keyboard.press(${d.quote(step.key)})${d.end}`);
+        lines.push(`${d.await}${page}.keyboard.press(${d.quote(step.key)})${d.end}`);
         break;
       case "scroll":
         lines.push(
           d.python
-            ? `page.evaluate("() => window.scrollTo(${step.x}, ${step.y})")`
-            : `await page.evaluate(() => window.scrollTo(${step.x}, ${step.y}));`,
+            ? `${page}.evaluate("() => window.scrollTo(${step.x}, ${step.y})")`
+            : `await ${page}.evaluate(() => window.scrollTo(${step.x}, ${step.y}));`,
         );
         break;
     }
@@ -977,7 +1022,7 @@ export function renderScript(
   const d = language === "python" ? PY : TS;
   const result = builder.finish();
   const generatedAt = options.generatedAt || new Date().toISOString();
-  const { lines, todos } = renderSteps(d, result.steps);
+  const { lines, todos } = renderSteps(d, result.steps, result.bindings);
   const c = d.comment;
   const filename = scriptFilename(language);
   const parameters = result.steps.flatMap(step => step.op === "fill" && step.parameter ? [step.parameter] : []);

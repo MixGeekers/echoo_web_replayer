@@ -1,6 +1,7 @@
 import { element as el, required, message } from "./dom";
 import { svg } from "./icons";
 import { object } from "../../shared/runtime";
+import { pageLabel } from "../../shared/contracts/ui";
 import { formatTime, escapeText } from "./format";
 import type {
   CollectorAPI,
@@ -70,6 +71,10 @@ export function createTimeline(
       "dom.mutation": ["DOM 变化", "code", "dom"],
       "dom.snapshot": ["页面快照", "camera", "snapshot"],
       "page.navigation": ["页面导航", "globe", "page"],
+      "page.open": ["打开页面", "plus", "page"],
+      "page.select": ["切换页面", "globe", "page"],
+      "page.close": ["关闭页面", "close", "page"],
+      "page.popup": ["打开子页面", "globe", "page"],
       "page.navigate": ["页面导航", "globe", "page"],
       "page.lifecycle": ["页面生命周期", "globe", "page"],
       "page.error": ["页面错误", "info", "page"],
@@ -176,7 +181,7 @@ export function createTimeline(
     summary.title = summaryText;
     const seq = document.createElement("span");
     seq.className = "event-seq";
-    seq.textContent = `#${String(event.seq ?? "").padStart(4, "0")} · ${event.type}`;
+    seq.textContent = [`#${String(event.seq ?? "").padStart(4, "0")}`, event.pageId && pageLabel(event.pageId), event.type].filter(Boolean).join(" · ");
     body.append(first, summary, seq);
     button.append(icon, body);
     return button;
@@ -362,7 +367,7 @@ export function createTimeline(
     el("detail-kind", "span").textContent = event.type;
     el("detail-title", "strong").textContent = "事件详情";
     el("detail-meta", "div").textContent =
-      `#${event.seq} · ${formatTime(event.timestamp)} · ${event.url || "本地记录"}`;
+      [`#${event.seq}`, event.pageId && pageLabel(event.pageId), formatTime(event.timestamp), event.url || "本地记录"].filter(Boolean).join(" · ");
     el("detail-json", "pre").textContent = "正在读取事件…";
     options.inspected?.(event);
     renderTimeline();

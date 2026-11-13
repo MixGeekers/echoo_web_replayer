@@ -1,9 +1,9 @@
 import type { ApplicationEventSink } from "../shared/contracts/application";
-import type { WebContentsView } from "electron";
+import type { WebContents } from "electron";
 import type { BrowserState } from "./recording";
 import { errorMessage, errorCode } from "../shared/runtime";
 interface Options {
-  browser: WebContentsView;
+  contents: WebContents;
   browserState: BrowserState;
   demoURL: string;
   notify: () => void;
@@ -11,16 +11,13 @@ interface Options {
   record: ApplicationEventSink;
 }
 export function createBrowserController({
-  browser,
+  contents: wc,
   browserState,
   demoURL,
   notify,
   reportError,
   record,
 }: Options) {
-  // WebContentsView.webContents becomes undefined after the page closes itself.
-  // Keep the original handle so lifecycle checks remain safe after destruction.
-  const wc = browser.webContents;
   function normalizeURL(input: unknown) {
     const raw = String(input || "").trim();
     if (raw === demoURL || raw === "tracedock://demo" || raw === "demo")
@@ -119,6 +116,7 @@ export function createBrowserController({
       });
     });
     wc.on("will-navigate", (event, url) => {
+      if (url === "about:blank") return;
       try {
         normalizeURL(url);
       } catch {
@@ -126,15 +124,6 @@ export function createBrowserController({
         reportError(new Error("已阻止不支持的页面协议"));
       }
     });
-    wc.setWindowOpenHandler(({ url }) => {
-      record("page.popup", { url, disposition: "opened-in-current-view" });
-      navigate(url).catch(reportError);
-      return { action: "deny" };
-    });
-    wc.session.setPermissionRequestHandler((_contents, _permission, callback) =>
-      callback(false),
-    );
-    wc.session.setPermissionCheckHandler(() => false);
   }
   return { navigate, normalizeURL, installEvents: browserEvents };
 }

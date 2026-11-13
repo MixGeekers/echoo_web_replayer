@@ -36,12 +36,26 @@ export interface BrowserState {
   canGoForward: boolean;
   error: string | null;
 }
+export type BrowserPageKind = "tab" | "window";
+export interface BrowserPageInfo {
+  id: string;
+  kind: BrowserPageKind;
+  openerId: string | null;
+  title: string;
+  url: string;
+}
+export function pageLabel(id: string): string {
+  const [kind, number] = id.split("-");
+  return `${kind === "window" ? "窗口" : "标签页"} ${number}`;
+}
 export interface AppState {
   mcp?: MCPState;
   profiles: ProfileMetadata[];
   sessionGroups: SessionGroupMetadata[];
   activeProfileId: string | null;
   browser: BrowserState;
+  pages: BrowserPageInfo[];
+  activePageId: string | null;
   session: SessionMetadata | null;
   sessions: SessionMetadata[];
   export: ExportProgress | null;
@@ -82,6 +96,9 @@ export interface ExportOptions {
   script?: boolean;
 }
 export interface CollectorAPI extends AnnotationAPI {
+  newPage(kind: BrowserPageKind): Promise<AppState>;
+  selectPage(id: string): Promise<AppState>;
+  closePage(id: string): Promise<AppState>;
   mcpCommand(input: MCPCommand): Promise<AppState>;
   mcpConfig(): Promise<MCPConfig>;
   getState(): Promise<AppState>;

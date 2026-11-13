@@ -73,6 +73,11 @@
   <main class="main">
     <div class="workbench">
       <section class="browser-card" aria-label="内嵌浏览器">
+        <div id="browser-pages" class="browser-pages">
+          <div id="browser-tab-list" class="browser-tab-list" role="tablist" aria-label="打开的页面"></div>
+          <button type="button" id="new-tab-button" class="icon-button" title="新建标签页" aria-label="新建标签页" data-icon="plus"></button>
+          <button type="button" id="new-window-button" class="demo-button" title="打开独立浏览窗口">新窗口</button>
+        </div>
         <form class="address-toolbar" id="address-form">
           <button type="button" id="back-button" class="icon-button" title="后退" aria-label="后退" data-icon="arrow-left" disabled></button>
           <button type="button" id="forward-button" class="icon-button" title="前进" aria-label="前进" data-icon="arrow-right" disabled></button>
@@ -346,7 +351,7 @@
     <div class="help-top"><h2>使用说明</h2><button id="close-help-button" class="icon-button" aria-label="关闭使用说明" data-icon="close"></button></div>
     <ol class="help-steps">
       <li>选择或创建 Profile，每个环境独立保留登录状态。切换或关闭环境会先结束当前录制。</li>
-      <li>输入网址，或打开演示页。</li>
+      <li>输入网址。地址栏上方的「＋」和「新窗口」可打开更多页面。同一 Profile 的标签页和弹窗共享登录状态，一次采集会记录所有页面。</li>
       <li>在 Profile 下新建 Session，再点击「开始采集」。同一个 Session 可以保存多条独立采集记录。</li>
       <li>选择采集记录后点击「回放」，播放、倍速或拖动进度；回放时点击时间线事件可定位画面。已保存的样式、图片和字体从本地加载。</li>
       <li>Session 和采集记录可分别归档或移入回收站；回收站支持恢复与彻底删除。删除 Profile 保留其历史录制。</li>

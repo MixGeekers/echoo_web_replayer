@@ -374,6 +374,7 @@ export class SessionStore {
       }
       const event = await this._append(id, {
         type: "page.resource",
+        ...(entry.pageId ? { pageId: entry.pageId, activePageId: entry.activePageId } : {}),
         timestamp: entry.capturedAt,
         payload: entry,
       });

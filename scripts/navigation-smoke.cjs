@@ -11,7 +11,19 @@ const output = path.join(root, 'output', `navigation-smoke-${Date.now()}`);
 const dataDir = path.join(output, 'data');
 const logs = [], errors = [], steps = [];
 let desktop, ui, guest, origin;
+const loginRequests = [];
 const server = http.createServer((request, response) => {
+  if (request.url === '/auth') {
+    let body = '';
+    request.on('data', chunk => { body += chunk; });
+    request.on('end', () => {
+      loginRequests.push({ method: request.method, body, cookie: request.headers.cookie });
+      response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Set-Cookie': 'result=approved; Path=/' });
+      response.end(`<!doctype html><title>Approval window</title><h1>Approve sign-in</h1>
+        <input id="code"><button id="approve" onclick="opener.postMessage('approved', location.origin); window.close()">Approve</button>`);
+    });
+    return;
+  }
   if (request.url === '/redirect') {
     response.writeHead(302, { Location: '/one' }); response.end(); return;
   }
@@ -20,7 +32,15 @@ const server = http.createServer((request, response) => {
     <h1>Navigation ${request.url}</h1><a id="next" href="/two">Next page</a>
     <input id="draft" aria-label="Draft">
     <button id="close" onclick="window.open('', '_self'); window.close()">Close page</button>
-    <a id="popup" href="/popup" target="_blank">Popup link</a>`);
+    <a id="popup" href="/popup" target="_blank">Popup link</a>
+    <form method="post" action="/auth" target="_blank">
+      <input type="hidden" name="challenge" value="new-tab"><button id="post-tab">Open in new tab</button>
+    </form>
+    <form method="post" action="/auth" target="login">
+      <input type="hidden" name="challenge" value="fixture">
+      <button id="login" onclick="window.open('about:blank','login','popup,width=520,height=420')">Sign in</button>
+    </form><output id="login-result"></output>
+    <script>onmessage = e => { if (e.origin === location.origin) document.querySelector('output').textContent = e.data; };</script>`);
 });
 async function until(check, label, timeout = 10000) {
   const deadline = Date.now() + timeout;
@@ -88,8 +108,15 @@ async function run() {
     await guest.locator('#draft').fill('reload clears this field');
     await ui.locator('#reload-button').click();
     await until(async () => await guest.locator('#draft').inputValue() === '', 'reload completes');
-    await guest.locator('#popup').click(); await guest.waitForURL(origin + '/popup');
-    assert.equal(desktop.windows().filter(p => !p.isClosed()).length, 2);
+    const parent = guest, parentId = (await state()).activePageId;
+    await guest.locator('#popup').click();
+    const child = await currentGuest('/popup');
+    assert.notEqual(child, parent);
+    assert.equal(parent.url(), origin + '/two');
+    const childId = (await state()).activePageId;
+    assert.notEqual(childId, parentId);
+    await ui.locator(`[data-action="close-${childId}"]`).click();
+    await until(async () => child.isClosed() && (await state()).activePageId === parentId, 'opener selected');
     await ui.locator('#home-button').click(); guest = await currentGuest('/demo/index.html');
   });
   await step('invalid protocols and redirects leave the address bar usable', async () => {
@@ -110,6 +137,70 @@ async function run() {
   await ui.locator('#management-name').fill('Navigation regression');
   await ui.locator('#management-confirm').click();
   await ui.locator('#management-dialog').waitFor({ state: 'hidden' });
+  await step('a POST form opens a new tab and its first request is captured', async () => {
+    const parentId = (await state()).activePageId;
+    const recording = await startRecording('POST tab');
+    await guest.locator('#post-tab').click();
+    const child = await currentGuest('/auth'), childId = (await state()).activePageId;
+    assert.notEqual(childId, parentId); assert.equal(guest.url(), origin + '/one');
+    assert.equal(loginRequests.at(-1).body, 'challenge=new-tab');
+    const list = await ui.evaluate(id => window.collector.getTimeline({ sessionId: id, types: ['network.request'] }), recording.id);
+    assert.ok(list.events.some(e => e.pageId === childId && e.payload.url === origin + '/auth' && e.payload.method === 'POST'));
+    await ui.locator(`[data-action="close-${childId}"]`).click();
+    await until(async () => child.isClosed() && (await state()).activePageId === parentId, 'return from POST tab');
+    await ui.locator('#stop-button').click();
+    await until(async () => (await state()).session.status === 'stopped', 'POST recording stops');
+  });
+  await step('named login popup preserves POST, cookies, opener callback and a shared recording', async () => {
+    const parent = guest, parentId = (await state()).activePageId;
+    await parent.evaluate(() => { document.cookie = 'challenge=fixture;path=/'; });
+    const recording = await startRecording('Multi-window sign-in');
+    await parent.locator('#login').click();
+    const popup = await currentGuest('/auth');
+    const info = await state(), childId = info.activePageId;
+    assert.equal(info.pages.length, 2);
+    assert.equal(info.pages.find(p => p.id === childId).kind, 'window');
+    assert.equal(info.pages.find(p => p.id === childId).openerId, parentId);
+    const requests = loginRequests.filter(r => r.body === 'challenge=fixture');
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].method, 'POST'); assert.match(requests[0].cookie, /challenge=fixture/);
+    assert.equal(parent.url(), origin + '/one');
+    await popup.locator('#code').fill('child input');
+    await popup.evaluate(async () => (await fetch('/child-fetch')).text());
+    await until(async () => {
+      const timeline = await ui.evaluate(id => window.collector.getTimeline({ sessionId: id, types: ['network.response'] }), recording.id);
+      return timeline.events.some(e => e.pageId === childId && e.payload.url.endsWith('/child-fetch'));
+    }, 'child response recorded before pause');
+    await ui.locator('#pause-button').click();
+    await until(async () => (await state()).session.status === 'paused', 'all pages paused');
+    await popup.locator('#code').fill('unrecorded edit');
+    await parent.locator('#draft').fill('unrecorded parent edit');
+    await ui.locator('#pause-button').click();
+    await until(async () => (await state()).session.status === 'recording', 'all pages resumed');
+    await popup.locator('#approve').click({ noWaitAfter: true });
+    await until(async () => popup.isClosed() && (await state()).activePageId === parentId, 'popup closed and returned to opener');
+    assert.equal(await parent.locator('#login-result').textContent(), 'approved');
+    assert.match(await parent.evaluate(() => document.cookie), /result=approved/);
+    await parent.locator('#draft').fill('back on parent');
+    await ui.locator('#stop-button').click();
+    await until(async () => (await state()).session?.status === 'stopped', 'recording stopped');
+    const events = (await fs.readFile(path.join(dataDir, 'workspace-v3', 'recordings', recording.id, 'timeline.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
+    for (const [pageId, value] of [[parentId,'back on parent'], [childId,'child input']]) {
+      assert.ok(events.some(e => e.pageId === pageId && e.type === 'action.input' && e.payload.form.value === value));
+      assert.ok(events.some(e => e.pageId === pageId && e.type === 'dom.snapshot'));
+    }
+    assert.ok(events.some(e => e.pageId === childId && e.type === 'network.response' && e.payload.url.endsWith('/child-fetch')));
+    const auth = events.find(e => e.pageId === childId && e.type === 'network.request' && e.payload.url.endsWith('/auth'));
+    assert.equal(auth?.payload.method, 'POST');
+    assert.ok(events.some(e => e.pageId === childId && e.type === 'page.close'));
+    assert.equal(events.filter(e => e.type === 'session.stop').length, 1);
+    assert.ok(!events.some(e => e.type === 'action.input' && e.payload.form.value.startsWith('unrecorded')));
+    for (const [pageId, value] of [[childId,'child input'],[parentId,'back on parent']]) {
+      const event = events.find(e => e.pageId === pageId && e.payload?.form?.value === value);
+      const baseline = await ui.evaluate(q => window.collector.replaySeek(q), { sessionId: recording.id, targetSeq: event.seq });
+      assert.equal(baseline.snapshot.pageId, pageId);
+    }
+  });
   await step('a close during recording saves events, marks the gap and ends capture', async () => {
     const recording = await startRecording('Close during recording');
     await guest.locator('#draft').fill('retained event');
@@ -135,13 +226,34 @@ async function run() {
     await ui.locator('#stop-button').click();
     await until(async () => (await state()).sessions.find(s => s.id === next.id).status === 'stopped', 'capture stops normally');
   });
-  await step('intentional Profile close stays closed and can be reopened', async () => {
+  await step('manual tabs and windows record together and close with the Profile', async () => {
     const profileId = (await state()).activeProfileId;
+    const parent = guest, parentId = (await state()).activePageId;
+    await ui.locator('#new-tab-button').click();
+    await until(async () => (await state()).pages.length === 2, 'new tab');
+    await navigate('/tab');
+    const tab = guest, tabId = (await state()).activePageId;
+    assert.equal(parent.url(), origin + '/one');
+    await ui.locator('#new-window-button').click();
+    await until(async () => (await state()).pages.length === 3, 'new window');
+    await navigate('/window');
+    const popup = guest, windowId = (await state()).activePageId;
+    const recording = await startRecording('Three existing pages');
+    for (const [page,id] of [[parent,parentId],[tab,tabId],[popup,windowId]]) {
+      await ui.locator(`[data-action="${id}"]`).click();
+      await until(async () => (await state()).activePageId === id, 'manual select');
+      await page.locator('#draft').fill('value-' + id);
+    }
     await ui.locator('#close-profile-button').click();
     await ui.locator('#management-confirm').click();
     await ui.locator('#management-dialog').waitFor({ state: 'hidden' });
     await until(async () => (await state()).activeProfileId === null, 'Profile closes');
     assert.equal((await state()).browser.available, false);
+    assert.deepEqual((await state()).pages, []);
+    const archived = (await state()).sessions.find(s => s.id === recording.id);
+    assert.equal(archived.status, 'stopped');
+    const timeline = await ui.evaluate(id => window.collector.getTimeline({ sessionId: id, types: ['action.input'] }), recording.id);
+    assert.deepEqual(new Set(timeline.events.map(e => e.pageId)), new Set([parentId,tabId,windowId]));
     assert.equal(desktop.windows().filter(p => p !== ui && !p.isClosed()).length, 0);
     await ui.locator(`#profile-tabs [data-profile-id="${profileId}"]`).click();
     guest = await currentGuest('/demo/index.html'); await navigate('/one');

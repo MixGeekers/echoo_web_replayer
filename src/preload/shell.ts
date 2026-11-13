@@ -26,6 +26,9 @@ function subscribe<T>(
   };
 }
 const api: CollectorAPI = {
+  newPage: (kind) => invoke("newPage", kind),
+  selectPage: (id) => invoke("selectPage", id),
+  closePage: (id) => invoke("closePage", id),
   mcpCommand: (input) => invoke("mcpCommand", input),
   mcpConfig: () => invoke("mcpConfig"),
   getState: () => invoke("getState"),

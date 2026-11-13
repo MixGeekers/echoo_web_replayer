@@ -26,7 +26,7 @@ export async function exportSession({
   sessionId,
   capture,
   destination,
-  appVersion = "0.2.0",
+  appVersion = "0.3.0",
   encoding = "delta",
   compression = "deflate",
   range,

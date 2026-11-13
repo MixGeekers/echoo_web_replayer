@@ -393,7 +393,9 @@ export class TimelineReader {
     const capture = await this.capture(sessionId),
       files = this._paths(sessionId);
     const handle = await fs.open(files.index, "r");
+    let summaries: FileHandle | undefined;
     try {
+      summaries = await fs.open(files.summaries, "r");
       const upperSeq = Number.isSafeInteger(endSeq)
         ? Math.max(0, Math.min(endSeq!, capture.metadata.lastSeq))
         : capture.metadata.lastSeq;
@@ -423,6 +425,8 @@ export class TimelineReader {
         let first;
         for await (const row of rows(handle, 0, count))
           if (row.category === 3) {
+            const event = await summary(summaries, row);
+            if (event.activePageId && event.pageId !== event.activePageId) continue;
             first = row;
             break;
           }
@@ -443,9 +447,13 @@ export class TimelineReader {
         }
         targetCount = low;
       }
+      const target = targetCount ? await summary(summaries, await rowAt(targetCount - 1)) : null;
+      // Selecting an event shows its source. Scrubbing time follows the foreground page.
+      const pageId = Number.isSafeInteger(targetSeq) ? target?.pageId ?? target?.activePageId : target?.activePageId ?? target?.pageId;
       let baseline = null;
       for await (const row of rows(handle, 0, targetCount, -1))
         if (row.category === 3) {
+          if (pageId && (await summary(summaries, row)).pageId !== pageId) continue;
           baseline = row;
           break;
         }
@@ -469,6 +477,7 @@ export class TimelineReader {
       }
       return {
         session: capture.metadata,
+        ...(pageId ? { pageId } : {}),
         snapshot,
         afterSeq: baseline?.seq || 0,
         targetSeq: targetCount ? (await rowAt(targetCount - 1)).seq : 0,
@@ -477,6 +486,7 @@ export class TimelineReader {
         timeMs: position,
       };
     } finally {
+      await summaries?.close();
       await handle.close();
     }
   }

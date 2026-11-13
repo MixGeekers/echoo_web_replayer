@@ -27,13 +27,14 @@ export class ResourceProtocol {
         return new Response(null, { status: 404 });
       id = decodeURIComponent(requestURL.pathname.slice(1));
       url = requestURL.searchParams.get("url");
+      const pageId = requestURL.searchParams.get("page") ?? undefined;
       const at = Math.max(0, Number(requestURL.searchParams.get("at")) || 0),
         endSeq = Math.max(
           0,
           Number(requestURL.searchParams.get("end") ?? at) || 0,
         );
       const entries = (await this.catalog.read(id)).filter(
-        (entry) => entry.url === url && entry.sha256 && entry.seq <= endSeq,
+        (entry) => entry.url === url && entry.sha256 && entry.seq <= endSeq && (!pageId || entry.pageId === pageId),
       );
       const entry =
         entries.filter((entry) => entry.seq <= at).at(-1) || entries[0];
@@ -52,7 +53,7 @@ export class ResourceProtocol {
                 : file.endsWith(".svg")
                   ? "image/svg+xml"
                   : "application/octet-stream";
-            return this.response(data, mime, url, id, at, endSeq);
+            return this.response(data, mime, url, id, at, endSeq, pageId);
           }
         }
         if (url) this.catalog.missing(id, url);
@@ -66,7 +67,7 @@ export class ResourceProtocol {
       if (createHash("sha256").update(body).digest("hex") !== entry.sha256)
         throw new Error("资源校验失败");
       this.catalog.found(id, url);
-      return this.response(body, entry.mimeType, url, id, at, endSeq);
+      return this.response(body, entry.mimeType, url, id, at, endSeq, pageId);
     } catch {
       if (id && url && this.catalog.has(id)) this.catalog.missing(id, url);
       return new Response(null, { status: 404 });
@@ -79,10 +80,11 @@ export class ResourceProtocol {
     id: string,
     at: number,
     endSeq: number,
+    pageId?: string,
   ): Response {
     const data =
       mimeType === "text/css"
-        ? Buffer.from(cssText(body.toString("utf8"), url, id, at, endSeq))
+        ? Buffer.from(cssText(body.toString("utf8"), url, id, at, endSeq, pageId))
         : body;
     return new Response(new Uint8Array(data), {
       headers: {

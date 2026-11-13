@@ -1,23 +1,19 @@
-import { app, WebContentsView, session as electronSession } from "electron";
+import { app, session as electronSession } from "electron";
 import type { BrowserWindow } from "electron";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { SessionStore } from "./storage/session-store";
 import { ProfileStore } from "./storage/profile-store";
 import { SessionGroupStore } from "./storage/session-group-store";
-import { ResourceRecorder } from "./resources/index";
+import { BrowserEnvironment, closedBrowserState } from "./browser-environment";
 import { ResourceCatalog } from "./resources/catalog";
 import { ResourceProtocol } from "./resources/protocol";
-import { createRecordingController } from "./recording";
-import { createBrowserController } from "./browser";
 import { createExportJobs } from "./export-jobs";
-import type { AppState, BrowserBounds, BrowserState } from "../shared/contracts/ui";
+import type { AppState, BrowserBounds } from "../shared/contracts/ui";
 import type { LibraryBatchInput } from "../shared/contracts/library";
 import { planLibraryBatch } from "./library-batch";
 import { errorMessage } from "../shared/runtime";
 import type { MCPState } from "../shared/contracts/mcp";
-import { isAgentInputDispatch } from "./mcp/browser";
-import { NetworkCapture } from "./network/capture";
 
 interface MCPHooks {
   snapshot(): MCPState;
@@ -29,14 +25,6 @@ interface MCPHooks {
   controlled(): boolean;
 }
 
-type Runtime = {
-  profileId: string;
-  disposing: boolean;
-  browser: WebContentsView;
-  resources: ResourceRecorder;
-  recording: ReturnType<typeof createRecordingController>;
-  navigation: ReturnType<typeof createBrowserController>;
-};
 export async function createWorkspace(win: BrowserWindow, demoURL: string) {
   // The hierarchy is a fresh baseline; no previous workspace is read or migrated.
   const root = path.join(app.getPath("userData"), "workspace-v3");
@@ -65,7 +53,7 @@ export async function createWorkspace(win: BrowserWindow, demoURL: string) {
   }
   const catalog = new ResourceCatalog(store);
   const resourceProtocol = new ResourceProtocol(store, catalog);
-  let runtime: Runtime | null = null;
+  let runtime: BrowserEnvironment | null = null;
   let replaySessionId: string | null = null;
   let queue: Promise<unknown> = Promise.resolve();
   let closing = false;
@@ -73,7 +61,6 @@ export async function createWorkspace(win: BrowserWindow, demoURL: string) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let lazyTimer: ReturnType<typeof setTimeout> | undefined;
   let bounds: BrowserBounds = {x:250,y:190,width:800,height:650,visible:false};
-  let browserState: BrowserState = {available:false,url:"",title:"未打开 Profile",loading:false,canGoBack:false,canGoForward:false,error:null};
   const reportError = (error: unknown) => {
     console.error("[TraceDock]", errorMessage(error));
     if (!win.isDestroyed()) win.webContents.send("collector:error", errorMessage(error));
@@ -87,9 +74,9 @@ export async function createWorkspace(win: BrowserWindow, demoURL: string) {
     if (closing) return Promise.reject(new Error("软件正在关闭"));
     return serialize(() => {mcp?.beforeCommand();return operation();});
   }
-  function requireRuntime(): Runtime {
+  function requireRuntime(): BrowserEnvironment {
     if (!runtime) throw new Error("请先打开一个 Profile");
-    if (!runtime.browser.webContents || runtime.browser.webContents.isDestroyed())
+    if (!runtime.activePageId || runtime.contents.isDestroyed())
       throw new Error("浏览环境正在恢复，请稍后重试");
     return runtime;
   }
@@ -116,107 +103,49 @@ export async function createWorkspace(win: BrowserWindow, demoURL: string) {
     const groups = sessionGroups.list(), ids = new Set(groups.map(group=>group.id));
     const current = runtime?.recording.currentSession() ?? null;
     return {...(mcp?{mcp:mcp.snapshot()}:{}),profiles:profiles.list(),sessionGroups:groups,activeProfileId:runtime?.profileId ?? null,
-      browser:{...browserState},session:current && ids.has(current.sessionGroupId) ? current : null,
+      browser:{...(runtime?.state ?? closedBrowserState())},pages:runtime?.list() ?? [],activePageId:runtime?.activePageId ?? null,session:current && ids.has(current.sessionGroupId) ? current : null,
       sessions:store.list().filter(record=>ids.has(record.sessionGroupId)),export:jobs.progress()};
   }
   function setBounds(value: BrowserBounds) {
     bounds = value;
-    if (runtime) {
-      runtime.browser.setBounds({x:value.x,y:value.y,width:value.width,height:value.height});
-      runtime.browser.setVisible(value.visible);
-    }
+    runtime?.setBounds(value);
   }
   async function closeEnvironment(reason: string, invalidate = true) {
-    if(invalidate)mcp?.environmentChanging(null);
-    const old = runtime;
-    if (old) {
-      old.disposing = true;
-      try {
-        await old.recording.stopSession(reason);
-        await store.flush();
-        await old.resources.close();
-        win.contentView.removeChildView(old.browser);
-        const contents = old.browser.webContents;
-        if (contents && !contents.isDestroyed()) contents.close();
-        runtime = null;
-      } finally {
-        old.disposing = false;
-      }
-    }
+    if (invalidate) mcp?.environmentChanging(null);
+    if (runtime) await runtime.dispose(reason);
+    runtime = null;
     await profiles.select(null);
-    browserState = {available:false,url:"",title:"未打开 Profile",loading:false,canGoBack:false,canGoForward:false,error:null};
     notify();
   }
   async function openEnvironment(id: string) {
     profiles.get(id);
     if (runtime?.profileId === id) return;
     mcp?.environmentChanging(id);
-    await closeEnvironment("profile-switch",false);
-    const browser = new WebContentsView({webPreferences:{
-      preload:path.join(__dirname,"browser-preload.cjs"), contextIsolation:true,
-      nodeIntegration:false,sandbox:true,webSecurity:true,backgroundThrottling:false,
-      partition:`persist:tracedock-profile-${id}`,
-    }});
-    win.contentView.addChildView(browser);
-    const blockHumanInput = (event: Electron.Event) => {
-      if(mcp?.controlled()&&!isAgentInputDispatch(browser.webContents)) event.preventDefault();
-    };
-    browser.webContents.on("before-input-event",(event,input) => {
-      // 专注模式快捷键：焦点在内嵌网页时也能切换，且不传给网页。
-      if(input.type==="keyDown"&&(input.control||input.meta)&&input.shift&&!input.alt&&input.code==="KeyF"){
-        event.preventDefault();
-        if(!win.isDestroyed()) win.webContents.send("shell:toggleFocusMode");
-        return;
-      }
-      blockHumanInput(event);
+    await closeEnvironment("profile-switch", false);
+    const current = new BrowserEnvironment(id, {
+      win, root, store, demoURL, profile: () => profiles.get(id), notify, notifyLater, reportError,
+      publish: event => { if (!win.isDestroyed()) win.webContents.send("collector:event", event); },
+      controlled: () => mcp?.controlled() ?? false,
+      targetChanged: () => mcp?.environmentChanging(null),
+      empty: () => {
+        if (closing || runtime !== current) return;
+        mcp?.environmentChanging(null);
+        void serialize(async () => {
+          if (closing || runtime !== current || current.activePageId) return;
+          await closeEnvironment("browser-closed", false);
+          await openEnvironment(id);
+          reportError(new Error("最后一个网页已关闭，已保存当前采集并重新打开此环境。"));
+        }).catch(reportError);
+      },
     });
-    browser.webContents.on("before-mouse-event",blockHumanInput);
-    browser.setBackgroundColor("#ffffff");
-    browserState = {available:true,url:demoURL,title:"交互实验室",loading:false,canGoBack:false,canGoForward:false,error:null};
-    const resources = new ResourceRecorder(store,browser.webContents,notify);
-    const network = new NetworkCapture(browser.webContents,{
-      recordingId:()=>{const s=recording.currentSession();return s?.status==="recording"?s.id:null;},
-      record:(type,payload,extra)=>recording.append(type,payload,extra),
-      error:message=>console.error("[TraceDock]",message),
-    });
-    // Network/console capture opens and closes with the same recording boundaries as resources.
-    const capture = {start:async(id:string|null)=>{await resources.start(id);await network.start();},stop:async()=>{await network.stop();await resources.stop();}};
-    const recording = createRecordingController({store,frameDocuments:doc=>network.archive.snapshots(doc),flushFrameDocuments:()=>network.flushFrameDocuments(),resources:capture,browser,browserState,profile:()=>profiles.get(id),
-      appVersion:app.getVersion(),notify,notifyLater,reportError,publish:event => {
-        if(!win.isDestroyed()) win.webContents.send("collector:event",event);
-      }});
-    const navigation = createBrowserController({browser,browserState,demoURL,notify,reportError,
-      record:(type,payload)=>{
-        if(recording.currentSession()?.status === "recording") recording.append(type,payload).catch(reportError);
-      }});
-    const current: Runtime = {profileId:id,disposing:false,browser,resources,recording,navigation};
     runtime = current;
-    browser.webContents.once("destroyed", () => {
-      if (runtime !== current || current.disposing || closing) return;
-      browserState.available = false;
-      browserState.loading = false;
-      browserState.canGoBack = false;
-      browserState.canGoForward = false;
-      mcp?.environmentChanging(null);
-      notify();
-      // A website can close its own WebContents. Save the recording before
-      // replacing that view, and never replay the site's last URL or form request.
-      void serialize(async () => {
-        if (runtime !== current || current.disposing || closing) return;
-        await closeEnvironment("browser-closed", false);
-        await openEnvironment(id);
-        reportError(new Error("网页关闭了浏览窗口，已重新打开当前环境。已有采集记录已保留，可重新输入网址继续使用。"));
-      }).catch(reportError);
-    });
-    setBounds(bounds);
+    current.setBounds(bounds);
+    const ses = electronSession.fromPartition(`persist:tracedock-profile-${id}`);
+    ses.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+    ses.setPermissionCheckHandler(() => false);
     try {
-      await browser.webContents.loadURL("about:blank");
-      await resources.init(root);
-      await network.init();
-      browser.webContents.once("destroyed",()=>{network.close().catch(reportError);});
-      navigation.installEvents();
+      await current.newPage("tab", false);
       await profiles.select(id);
-      await navigation.navigate(demoURL);
     } catch (error) {
       await closeEnvironment("profile-open-failed");
       throw error;
@@ -380,7 +309,7 @@ export async function createWorkspace(win: BrowserWindow, demoURL: string) {
       }
       catch {return Promise.resolve(new Response(null,{status:404}));}
     },
-    resourceSummary:(id:string,endSeq?:number)=>readRecording(id,()=>catalog.summary(id,endSeq,runtime?.resources.captureError ?? null)),
+    resourceSummary:(id:string,endSeq?:number)=>readRecording(id,()=>catalog.summary(id,endSeq,runtime?.captureError ?? null)),
     init:async()=>{const id=profiles.activeId;if(id)await openEnvironment(id);},
     close:async()=>{
       closing=true;
@@ -388,10 +317,8 @@ export async function createWorkspace(win: BrowserWindow, demoURL: string) {
       // Preserve the selected environment for the next launch; closing a Profile is separate.
       try {
       await serialize(async()=>{
-        const old=runtime;
-        if(old){await old.recording.stopSession("window-close");await store.flush();await old.resources.close();
-          const contents=old.browser.webContents;
-          if(contents&&!contents.isDestroyed())contents.close();runtime=null;}
+        if (runtime) await runtime.dispose("window-close");
+        runtime = null;
       });
       await exportClosing;
       await store.flush();clearTimeout(timer);clearTimeout(lazyTimer);

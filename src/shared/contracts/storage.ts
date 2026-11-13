@@ -1,6 +1,8 @@
 /** Raw persistence accepts arbitrary payloads; replay validates its supported event variants separately. */
 export interface EventInput {
   type: string;
+  pageId?: string | undefined;
+  activePageId?: string | undefined;
   timestamp?: string | undefined;
   url?: string | undefined;
   title?: string | undefined;
@@ -24,6 +26,8 @@ export interface StoredEvent extends EventInput {
 }
 export interface EventPreview {
   seq: number;
+  pageId?: string | undefined;
+  activePageId?: string | undefined;
   type: string;
   id?: string | undefined;
   sessionId?: string | undefined;
@@ -117,6 +121,7 @@ export interface ChunkQuery {
 }
 export interface ReplaySeekResult {
   session: SessionMetadata;
+  pageId?: string;
   snapshot: StoredEvent | null;
   afterSeq: number;
   targetSeq: number;

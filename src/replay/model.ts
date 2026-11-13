@@ -68,6 +68,7 @@ export type ReplayEvent = {
     payload: Payloads[K];
     seq: number;
     documentId: string | null;
+    pageId?: string | undefined;
     url: string;
   };
 }[keyof Payloads];
@@ -252,6 +253,7 @@ export function decodeReplayEvent(event: StoredEvent): ReplayEvent | null {
   const p = object(event.payload),
     meta = {
       seq: event.seq,
+      pageId: event.pageId,
       documentId:
         typeof event.documentId === "string" ? event.documentId : null,
       url: string(event.url),

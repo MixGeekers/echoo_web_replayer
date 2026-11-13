@@ -8,6 +8,9 @@ export type {
 import type { CollectorAPI } from "./ui";
 import type { AnnotationChannel } from "./annotations";
 export type InvokeChannel =
+  | "newPage"
+  | "selectPage"
+  | "closePage"
   | "mcpCommand"
   | "mcpConfig"
   | "getState"

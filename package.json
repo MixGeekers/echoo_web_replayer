@@ -1,6 +1,6 @@
 {
   "name": "tracedock",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "TraceDock 浏览器操作与 DOM 时间线采集工作台",
   "main": "out/main.cjs",

@@ -248,6 +248,20 @@ test('same-origin iframes use frameLocator; open shadow roots are scoped by host
   assert.match(py, /    page\.locator\("#shadow-host"\)\.get_by_role\("button", name="点击组件按钮 ↗"\)\.click\(\)\n/);
 });
 
+test('actions in a child window are generated against that window in both languages', () => {
+  const t = timeline();
+  const url = 'https://account.example/approve', field = el('n1', 'input', [{ strategy: 'id', value: 'approval' }]);
+  t.add('session.start', {}, { pageId: 'tab-1' });
+  t.add('page.open', { kind: 'window', openerId: 'tab-1' }, { pageId: 'window-2', url: 'about:blank' });
+  t.add('page.navigation', { url }, { pageId: 'window-2', url });
+  t.add('action.input', input(field, 'first'), { pageId: 'window-2', documentId: 'child' });
+  t.add('action.input', input(field, 'second'), { pageId: 'tab-1', documentId: 'parent' });
+  const ts = generate(t.events).code, py = generate(t.events, { language: 'python' }).code;
+  assert.match(ts, /page2\.locator\('#approval'\)\.fill\('first'\)/);
+  assert.match(ts, /page\.locator\('#approval'\)\.fill\('second'\)/);
+  assert.match(py, /page2\.locator\("#approval"\)\.fill\("first"\)/);
+});
+
 test('pause/resume, interruptions, errors, popups and file inputs are annotated', () => {
   const t = timeline();
   t.start();

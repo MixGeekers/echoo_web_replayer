@@ -62,7 +62,6 @@ export class NetworkCapture {
   private intervalStart = 0;
   private queue: Promise<void> = Promise.resolve();
   private lease: BrowserDebuggerLease | undefined;
-  private bodyBudget = new Map<string, number>();
   /** Opened by start() after session.start/resume, closed by stop() before session.pause/stop. */
   private capturing = false;
   private accepting = false;
@@ -71,6 +70,7 @@ export class NetworkCapture {
   constructor(
     private readonly host: NetworkHost,
     private readonly sink: NetworkSink,
+    private readonly bodyBudget = new Map<string, number>(),
   ) {}
   async init(): Promise<this> {
     try {
@@ -295,9 +295,12 @@ export class NetworkCapture {
       return { bodyOmitted: `无法读取响应正文：${errorMessage(error)}` };
     }
     if (!this.isCurrent(owner)) return {};
-    const remaining = Math.min(NETWORK_LIMITS.bodyBytes, NETWORK_LIMITS.sessionBodyBytes - used);
+    // Other pages in this recording may have finished a body read while CDP was responding.
+    const nowUsed = this.bodyBudget.get(owner.recordingId) ?? 0;
+    const remaining = Math.min(NETWORK_LIMITS.bodyBytes, NETWORK_LIMITS.sessionBodyBytes - nowUsed);
+    if (remaining <= 0) return { bodyOmitted: "本次采集的响应正文已达上限" };
     const result = captureBody(response, payload.mimeType, remaining);
-    if ("body" in result) this.bodyBudget.set(owner.recordingId, used + Math.min(result.body.bytes, remaining));
+    if ("body" in result) this.bodyBudget.set(owner.recordingId, nowUsed + Math.min(result.body.bytes, remaining));
     return result;
   }
   private onRuntime(method: string, params: Record<string, unknown>, sessionId?: string): void {

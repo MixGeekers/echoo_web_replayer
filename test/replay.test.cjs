@@ -21,6 +21,32 @@ async function setup(t) {
   return { directory, store, id: session.id };
 }
 
+test('time scrubbing follows the foreground page and selecting a background event uses its own baseline', async t => {
+  const { store, id } = await setup(t);
+  const add = (type, pageId) => store.append(id, { type, pageId, activePageId: 'tab-1', payload: {} });
+  const parent = await add('dom.snapshot', 'tab-1');
+  const child = await add('dom.snapshot', 'window-2');
+  const background = await add('dom.mutation', 'window-2');
+  const seek = query => store.replaySeek({ sessionId: id, ...query });
+  assert.equal((await seek({ targetSeq: background.seq })).snapshot.seq, child.seq);
+  assert.equal((await seek({ timeMs: Number.MAX_SAFE_INTEGER })).snapshot.seq, parent.seq);
+});
+
+test('a resource URL reused by two recorded pages resolves to each page’s own bytes', async t => {
+  const { store, id, directory } = await setup(t);
+  const recorder = new ResourceRecorder(store, {}), url = 'https://site.test/shared.css';
+  for (const [pageId, color] of [['tab-1', 'red'], ['window-2', 'blue']]) {
+    const body = Buffer.from(`body{color:${color}}`), sha256 = createHash('sha256').update(body).digest('hex');
+    const source = path.join(directory, sha256);
+    await fs.writeFile(source, body);
+    await store.saveResource(id, { pageId, url, sha256, mimeType: 'text/css', status: 'saved' }, source);
+  }
+  for (const [pageId, color] of [['tab-1', 'red'], ['window-2', 'blue']]) {
+    const response = await recorder.respond({ method: 'GET', url: resourceURL(url, '', id, 10, 10, pageId) });
+    assert.equal(await response.text(), `body{color:${color}}`);
+  }
+});
+
 test('seek uses the preceding snapshot and chunks obey a frozen sequence boundary', async t => {
   const { store, id } = await setup(t);
   await assert.rejects(store.replaySeek({ sessionId: id }), /没有可回放/);
